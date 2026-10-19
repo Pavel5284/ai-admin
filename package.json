@@ -1,0 +1,25 @@
+{
+  "dependencies": {
+    "dotenv": "^18.0.8",
+    "grammy": "^1.46.0",
+    "pg": "^8.23.1",
+    "yaml": "^2.9.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "@types/pg": "^8.23.1",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  },
+  "scripts": {
+    "chat": "tsx src/channels/cli.ts",
+    "dev": "tsx watch src/channels/telegram.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "eval": "tsx tests/runner.ts",
+    "kb:load": "tsx scripts/load-kb.ts",
+    "typecheck": "tsc"
+  }
+}
