@@ -23,6 +23,7 @@ export function handleEvent(sessionId: string, ev: BotEvent, now = new Date()): 
       sessionId, stateFrom: from, stateTo: result.ctx.state,
       userText: ev.type === 'user_text' ? ev.text : '[' + ev.type + ']',
       botText: say.join(' / '), latencyMs: Date.now() - t0,
+      nlu: result.nlu,
     });
     return say;
   });

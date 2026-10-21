@@ -16,11 +16,12 @@ export async function saveCtx(ctx: Ctx): Promise<void> {
 
 export async function logTurn(r: {
   sessionId: string; stateFrom: string; stateTo: string;
-  userText: string; botText: string; latencyMs: number;
+  userText: string; botText: string; latencyMs: number; nlu?: unknown;
 }): Promise<void> {
   await pool.query(
-    `INSERT INTO dialog_log (session_id, state_from, state_to, user_text, bot_text, latency_ms)
-     VALUES ($1, $2, $3, $4, $5, $6)`,
-    [r.sessionId, r.stateFrom, r.stateTo, r.userText, r.botText, r.latencyMs],
+    `INSERT INTO dialog_log (session_id, state_from, state_to, user_text, bot_text, latency_ms, nlu)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+    [r.sessionId, r.stateFrom, r.stateTo, r.userText, r.botText, r.latencyMs,
+     r.nlu ? JSON.stringify(r.nlu) : null],
   );
 }

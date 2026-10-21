@@ -105,12 +105,16 @@ export function checkGlobalIntents(ctx: Ctx, ev: BotEvent): StepResult | null {
   return null;
 }
 
-/** Клиент молчит: 1 — напомнить, 2 — повторить короче, 3 — вежливо закрыть, слоты сохранить. */
+/** Клиент молчит: 1 — напомнить, 2 — повторить вопрос короче, 3 — вежливо закрыть, слоты сохранить. */
 export function onSilence(ctx: Ctx, _ev: BotEvent): StepResult {
   const n = (ctx.retries.SILENCE ?? 0) + 1;
   ctx.retries.SILENCE = n;
   if (n === 1) return { ctx, say: [R.silence[0]], actions: [] };
-  if (n === 2) return { ctx, say: [R.silence[1]], actions: [] };
+  if (n === 2) {
+    // Повторяем сам вопрос — коротко. Напоминание о молчании за вопрос не считаем.
+    const last = [...ctx.history].reverse().find((h) => h.role === 'bot' && !R.silence.includes(h.text));
+    return { ctx, say: [last && last.text.length <= 120 ? last.text : R.silence[1]], actions: [] };
+  }
   ctx.outcome = 'abandoned';
   return { ctx, say: [R.silence[2]], actions: [] };
 }

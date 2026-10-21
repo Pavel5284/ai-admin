@@ -1,6 +1,7 @@
 import type { Ctx } from '../dialog/states';
 import { normalize } from './normalize';
 import { parseWhen } from './dates';
+import { parseBareHour } from './time';
 import { parsePhone } from './phone';
 
 /**
@@ -107,6 +108,15 @@ export async function understand(ctx: Ctx, text: string, now: Date): Promise<Nlu
   if (when.time) nlu.time = when.time;
   if (when.timeRange) nlu.timeRange = when.timeRange;
   if (when.ambiguous) nlu.ambiguous = when.ambiguous;
+
+  // «18» в ответ на вопрос о времени — это час, а не «18-е число».
+  if (!nlu.time && !nlu.timeRange && nlu.date && ctx.lastAsked === 'ASK_TIME') {
+    const bare = parseBareHour(t);
+    if (bare) {
+      nlu.time = bare;
+      delete nlu.date;
+    }
+  }
 
   const phone = parsePhone(text, ctx.slots.phoneDraft);
   if (phone.status === 'ok') {

@@ -45,7 +45,13 @@ export type Action =
   | { type: 'handoff'; reason: string }
   | { type: 'end' };
 
-export type StepResult = { ctx: Ctx; say: string[]; actions: Action[] };
+export type StepResult = {
+  ctx: Ctx;
+  say: string[];
+  actions: Action[];
+  /** Что удалось разобрать в реплике: пишется в dialog_log.nlu для метрик. */
+  nlu?: unknown;
+};
 
 export const newCtx = (sessionId: string, now: Date): Ctx => ({
   sessionId, state: 'START', slots: {}, retries: {}, history: [], lastActivityAt: now.getTime(),

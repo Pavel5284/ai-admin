@@ -11,6 +11,19 @@ export type TimeResult = {
   ambiguous?: string[];                    // что нужно уточнить у клиента
 };
 
+/**
+ * Голое число в ответ на вопрос о времени: «18» — это 18:00, а не «18-е число».
+ * Правило рабочих часов из D-007: час меньше 10 не может быть утром в салоне.
+ */
+export function parseBareHour(text: string): string | undefined {
+  const m = /^(\d{1,2})$/.exec(text.trim());
+  if (!m) return undefined;
+  const h = Number(m[1]);
+  if (h < 1 || h > 24) return undefined;
+  const hour = h < WORK_START ? h + 12 : h;
+  return `${pad(hour)}:00`;
+}
+
 /** Часы работы салона: 10:00–21:00. Всё, что вне, — забота оператора. */
 export const WORK_START = 10;
 export const WORK_END = 21;

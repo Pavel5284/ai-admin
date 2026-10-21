@@ -54,6 +54,23 @@ const WEEKDAYS: Record<string, number> = {
 
 type Hit = { date: string; start: number; end: number };
 
+/** Горизонт записи: не дальше 60 дней вперёд (паспорт слота date в algorithm.md). */
+export const MAX_HORIZON_DAYS = 60;
+
+/**
+ * Проверка даты перед записью: не в прошлом и не дальше горизонта.
+ * Возвращает причину, если дата не подходит, иначе null.
+ */
+export function dateIssue(date: string, now: Date): 'past' | 'far' | null {
+  const [y, m, d] = date.split('-').map(Number);
+  if (!y || !m || !d) return 'past';
+  const target = new Date(y, m - 1, d);
+  const diff = Math.round((target.getTime() - todayOf(now).getTime()) / 86400000);
+  if (diff < 0) return 'past';
+  if (diff > MAX_HORIZON_DAYS) return 'far';
+  return null;
+}
+
 /**
  * «Съесть» найденный фрагмент: заменяем его пробелами, чтобы следующее
  * правило не увидело те же цифры. Именно это спасает от «23 10»,
@@ -86,6 +103,8 @@ const nearestWeekday = (from: Date, target: number): Date => {
 function relativeDay(text: string, today: Date): Hit | null {
   const rules: Array<[RegExp, (m: RegExpExecArray) => number]> = [
     [wb('послезавтра'), () => 2],
+    [wb('позавчера'), () => -2],
+    [wb('вчера'), () => -1],
     [wb('сегодня'), () => 0],
     [wb('завтра'), () => 1],
     [wb(String.raw`через\s+(\d+)\s*(?:день|дня|дней)`), (m) => Number(m[1])],
