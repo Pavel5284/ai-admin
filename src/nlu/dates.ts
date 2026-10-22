@@ -19,6 +19,10 @@ const iso = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.ge
 
 const todayOf = (now: Date) => new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
+/** Дата в формате 'YYYY-MM-DD' — так она уходит в запросы к БД. */
+export const isoDate = (d: Date): string =>
+  `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+
 const addDays = (d: Date, n: number): Date => {
   const x = new Date(d.getFullYear(), d.getMonth(), d.getDate());
   x.setDate(x.getDate() + n);

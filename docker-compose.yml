@@ -5,6 +5,7 @@ services:
       POSTGRES_USER: app
       POSTGRES_PASSWORD: app
       POSTGRES_DB: admin
+      TZ: Europe/Moscow          # локальное время БД = часовой пояс бизнеса (D-006)
     ports: ['5432:5432']
     volumes:
       - ./db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
@@ -17,7 +18,7 @@ services:
   mock-crm:
     build: ./mock-crm
     environment:
-      CHAOS: '0'
+      CHAOS: ${CHAOS:-0}
     ports: ['4000:4000']
 
   bot:

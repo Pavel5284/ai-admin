@@ -1,17 +1,17 @@
-import type { Action, BotEvent, Ctx, StateId, StepResult } from './states';
+import type { Action, BotEvent, BookingRef, Ctx, StateId, StepResult } from './states';
 import { R } from './replies';
 import {
   checkGlobalIntents, goto, handoff, misunderstood, onBargeIn, onSilence, pick, say,
 } from './policies';
-import { formatDate, hasFaqQuestion, matchMaster, serviceTitle, understand, type Nlu } from '../nlu/intent';
-import { dateIssue } from '../nlu/dates';
-import { findFreeSlots, type FreeSlot } from '../services/slots';
+import { formatDate, hasFaqQuestion, understand, type Nlu } from '../nlu/intent';
+import { dateIssue, isoDate } from '../nlu/dates';
+import { outsideWorkHours } from '../nlu/time';
+import {
+  findBookingsByPhone, findSlots, matchMaster, masterById, nearestSlots, serviceTitle,
+  type Booking, type FreeSlot,
+} from '../services/slots';
 
 type Handler = (ctx: Ctx, nlu: Nlu, now: Date) => StepResult | Promise<StepResult>;
-
-/** Мастера из seed.sql; после подключения БД идентификаторы придут из таблицы masters. */
-const MASTER_IDS: Record<string, number> = { 'артем': 1, 'руслан': 2, 'диана': 3 };
-const MASTER_NAMES: Record<number, string> = { 1: 'Артём', 2: 'Руслан', 3: 'Диана' };
 
 export async function step(ctx: Ctx, ev: BotEvent, now: Date): Promise<StepResult> {
   ctx.lastActivityAt = now.getTime();
@@ -95,7 +95,7 @@ function absorb(ctx: Ctx, nlu: Nlu): void {
   if (/(любому|любой|неважно|все равно|кто свободен)/.test(nlu.text)) delete s.masterId;
   else {
     const master = matchMaster(nlu.text);
-    if (master) s.masterId = MASTER_IDS[master];
+    if (master) s.masterId = master.id;
   }
 }
 
@@ -114,8 +114,7 @@ function confirmAsk(ctx: Ctx, now: Date): StepResult {
   const s = ctx.slots;
   ctx.state = 'CONFIRM';
   ctx.lastAsked = 'CONFIRM';
-  ctx.pending = undefined;
-  const master = s.masterId ? MASTER_NAMES[s.masterId] : undefined;
+  const master = s.masterId ? masterById(s.masterId)?.name : undefined;
   const summary = [
     serviceTitle(s.service) ?? 'услуга',
     s.date ? formatDate(s.date, now) : 'дата не выбрана',
@@ -123,6 +122,11 @@ function confirmAsk(ctx: Ctx, now: Date): StepResult {
     master ? `мастер ${master}` : 'мастер на выбор',
     s.phone ?? 'телефон не указан',
   ].join(', ');
+  // При переносе мы не «записываем», а меняем время — формулировка другая.
+  if (ctx.pending === 'reschedule') {
+    return { ctx, say: [R.confirmReschedule(summary)], actions: [] };
+  }
+  ctx.pending = undefined;
   return { ctx, say: [R.confirm(summary)], actions: [] };
 }
 
@@ -149,19 +153,61 @@ function pickSlot(nlu: Nlu, free: FreeSlot[]): FreeSlot | undefined {
   return undefined;
 }
 
-/** Окна только у выбранного мастера, если клиент его назвал. */
-function forMaster(free: FreeSlot[], masterId?: number): FreeSlot[] {
-  return masterId ? free.filter((f) => f.masterId === masterId) : free;
+/** Выбор одной из нескольких найденных записей. */
+function pickBooking<T extends { id: number; time: string }>(
+  nlu: Nlu,
+  bookings: T[],
+): T | undefined {
+  const index: Record<string, number> = {
+    '1': 0, '2': 1, '3': 2, 'один': 0, 'два': 1, 'три': 2,
+    'первая': 0, 'вторая': 1, 'третья': 2, 'первый': 0, 'второй': 1, 'третий': 2,
+  };
+  if (nlu.text in index) return bookings[index[nlu.text]];
+  if (nlu.time) {
+    const byTime = bookings.find((b) => b.time === nlu.time);
+    if (byTime) return byTime;
+  }
+  return undefined;
 }
 
-/** Окно попадает в диапазон «после обеда», «вечером» и т. п. */
-function inRange(time: string, range: { from: string; to: string }): boolean {
-  return time >= range.from && time < range.to;
+/** Запись найдена: дальше — отмена или перенос. */
+function afterBookingFound(ctx: Ctx, booking: BookingRef, now: Date): StepResult {
+  if (ctx.pending === 'reschedule') {
+    // Перенос: та же услуга и мастер, новая дата и время.
+    ctx.slots.service = booking.serviceCode;
+    ctx.slots.masterId = booking.masterId;
+    delete ctx.slots.date;
+    delete ctx.slots.time;
+    delete ctx.slots.timeRange;
+    return goto(ctx, 'ASK_DATE', R.askDate);
+  }
+  // Отмена: показываем, что именно отменяем, и просим подтвердить.
+  ctx.state = 'CONFIRM';
+  ctx.lastAsked = 'CONFIRM';
+  const summary = `${booking.serviceTitle}, ${booking.date} ${booking.time}, мастер ${booking.masterName}`;
+  return { ctx, say: [R.cancelBooking(summary)], actions: [] };
 }
 
-/** Время вне часов работы салона: 10:00–21:00 (D-007). */
-function outsideWorkHours(time: string): boolean {
-  return time < '10:00' || time > '21:00';
+/** Чистим слоты записи — например, когда по телефону ничего не нашли. */
+function clearBookingSlots(ctx: Ctx): void {
+  delete ctx.slots.service;
+  delete ctx.slots.date;
+  delete ctx.slots.time;
+  delete ctx.slots.timeRange;
+}
+
+/**
+ * Нужный день занят: показываем ближайшие дни со свободными окнами
+ * и просим назвать другой день (строка «Нет свободных слотов» в таблице нештатных ситуаций).
+ */
+async function offerOtherDays(ctx: Ctx, now: Date): Promise<StepResult> {
+  const from = ctx.slots.date ?? isoDate(now);
+  const near = await nearestSlots(ctx.slots.service, from, now);
+  if (!near.length) return goto(ctx, 'ASK_DATE', R.noSlots);
+  const list = near
+    .map((d) => `${formatDate(d.date, now)} — ${d.slots.map((s) => s.time).join(', ')}`)
+    .join('; ');
+  return goto(ctx, 'ASK_DATE', [`${R.noSlots[0]} Ближайшие окна: ${list}. На какой день перенесём?`]);
 }
 
 /** Клиент сказал неоднозначно — уточняем, слот не заполняем. */
@@ -266,16 +312,19 @@ const handlers: Record<StateId, Handler> = {
     }
     ctx.retries.ASK_TIME = 0;
 
-    const free = forMaster(await findFreeSlots(ctx.slots.date, ctx.slots.service), ctx.slots.masterId);
-    if (!free.length) return goto(ctx, 'ASK_DATE', R.noSlots);
-
-    // Время-диапазон («после обеда»): конкретное окно выбираем из свободных.
+    // Время-диапазон («после обеда»): ищем окна внутри диапазона.
     if (!ctx.slots.time && ctx.slots.timeRange) {
-      const inRangeSlots = free.filter((f) => inRange(f.time, ctx.slots.timeRange!));
-      if (inRangeSlots.length) return offerSlots(ctx, inRangeSlots, now);
-      return offerSlots(ctx, free, now, R.rangeBusy[0]);
+      const inRange = await findSlots(ctx.slots.service, ctx.slots.date, now, {
+        range: ctx.slots.timeRange, masterId: ctx.slots.masterId,
+      });
+      if (inRange.length) return offerSlots(ctx, inRange, now);
+      return offerOtherDays(ctx, now);
     }
 
+    const free = await findSlots(ctx.slots.service, ctx.slots.date, now, {
+      masterId: ctx.slots.masterId,
+    });
+    if (!free.length) return offerOtherDays(ctx, now);
     if (ctx.slots.time && !free.some((f) => f.time === ctx.slots.time)) {
       return offerSlots(ctx, free, now);   // это время занято — показываем свободные
     }
@@ -284,8 +333,10 @@ const handlers: Record<StateId, Handler> = {
 
   OFFER_SLOTS: async (ctx, nlu, now) => {
     absorb(ctx, nlu);
-    const free = forMaster(await findFreeSlots(ctx.slots.date, ctx.slots.service), ctx.slots.masterId);
-    if (!free.length) return goto(ctx, 'ASK_DATE', R.noSlots);
+    const free = await findSlots(ctx.slots.service, ctx.slots.date, now, {
+      range: ctx.slots.timeRange, masterId: ctx.slots.masterId,
+    });
+    if (!free.length) return offerOtherDays(ctx, now);
     const chosen = pickSlot(nlu, free);
     if (chosen) {
       ctx.slots.time = chosen.time;
@@ -338,21 +389,56 @@ const handlers: Record<StateId, Handler> = {
         delete ctx.slots.phone;
         return goto(ctx, 'ASK_CONTACT', R.askPhone);
       }
+      // Мастер — такой же слот, как дата и время (D-021): его меняют
+      // и словом «мастер», и просто именем («нет, к Артёму»).
+      if (/(мастер|специалист|барбер)/.test(nlu.text)) {
+        // Если имя назвали («хочу к Артёму»), absorb его уже проставил — перезачитываем запись.
+        if (matchMaster(nlu.text)) return confirmAsk(ctx, now);
+        delete ctx.slots.masterId;
+        return goto(ctx, 'ASK_MASTER', R.askMaster);
+      }
+      if (matchMaster(nlu.text)) return confirmAsk(ctx, now);
       return misunderstood(ctx, 'CONFIRM');
     }
 
     // подтверждение отмены
     if (ctx.pending === 'cancel') {
       if (nlu.yes) {
+        const actions: Action[] = ctx.bookingId
+          ? [{ type: 'cancel_booking', id: ctx.bookingId }]
+          : [];
         ctx.slots = {};
         ctx.pending = undefined;
+        ctx.bookingId = undefined;
+        ctx.bookings = undefined;
         ctx.outcome = 'cancelled';
         ctx.state = 'DONE';
-        return { ctx, say: pick(ctx, R.cancelled), actions: [] };
+        return { ctx, say: pick(ctx, R.cancelled), actions };
       }
       if (nlu.no) {
         ctx.pending = undefined;
         return advance(ctx, now);
+      }
+      return misunderstood(ctx, 'CONFIRM');
+    }
+
+    // подтверждение переноса
+    if (ctx.pending === 'reschedule' && ctx.bookingId) {
+      if (nlu.yes) {
+        const actions: Action[] = [{
+          type: 'reschedule_booking',
+          id: ctx.bookingId,
+          date: ctx.slots.date ?? '',
+          time: ctx.slots.time ?? '',
+        }];
+        ctx.pending = undefined;
+        ctx.bookingId = undefined;
+        ctx.outcome = 'rescheduled';
+        ctx.state = 'DONE';
+        return { ctx, say: pick(ctx, R.rescheduled), actions };
+      }
+      if (nlu.no) {
+        return goto(ctx, 'ASK_DATE', R.askDate);   // на какую дату переносим
       }
       return misunderstood(ctx, 'CONFIRM');
     }
@@ -373,8 +459,18 @@ const handlers: Record<StateId, Handler> = {
     return misunderstood(ctx, 'CONFIRM');
   },
 
-  FIND_BOOKING: (ctx, nlu) => {
+  FIND_BOOKING: async (ctx, nlu, now) => {
     absorb(ctx, nlu);
+
+    // Клиент выбирает одну из нескольких найденных записей.
+    if (ctx.bookings?.length && !ctx.bookingId) {
+      const chosen = pickBooking(nlu, ctx.bookings);
+      if (!chosen) return misunderstood(ctx, 'FIND_BOOKING');
+      ctx.bookingId = chosen.id;
+      ctx.bookings = undefined;
+      return afterBookingFound(ctx, chosen, now);
+    }
+
     if (!ctx.slots.phone) {
       if (nlu.phoneStatus === 'too_long') {
         delete ctx.slots.phoneDraft;
@@ -386,14 +482,22 @@ const handlers: Record<StateId, Handler> = {
       }
       return goto(ctx, 'FIND_BOOKING', R.askPhone);
     }
-    // Заглушка до дня 8: поиск записей в БД появится вместе со слотами.
-    delete ctx.slots.service;
-    delete ctx.slots.date;
-    delete ctx.slots.time;
-    delete ctx.slots.timeRange;
-    return goto(ctx, 'ASK_SERVICE', [
-      'Не нашёл запись на этот номер. Давайте запишем заново — на какую услугу?',
-    ]);
+
+    const bookings = await findBookingsByPhone(ctx.slots.phone);
+    if (!bookings.length) {
+      // Записей нет — предложим записаться заново.
+      clearBookingSlots(ctx);
+      return goto(ctx, 'ASK_SERVICE', R.notFoundBooking);
+    }
+    if (bookings.length > 1) {
+      ctx.bookings = bookings;
+      const list = bookings
+        .map((b, i) => `${i + 1}) ${b.serviceTitle}, ${b.date} ${b.time}`)
+        .join(', ');
+      return goto(ctx, 'FIND_BOOKING', [`Нашёл несколько записей: ${list}. Какую переносим или отменяем?`]);
+    }
+    ctx.bookingId = bookings[0].id;
+    return afterBookingFound(ctx, bookings[0], now);
   },
 
   FAQ: (ctx) => faqAnswer(ctx),

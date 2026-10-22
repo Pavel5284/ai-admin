@@ -28,6 +28,11 @@ export function parseBareHour(text: string): string | undefined {
 export const WORK_START = 10;
 export const WORK_END = 21;
 
+/** Время вне рабочих часов: «на 6 утра» записать нельзя (D-007). */
+export function outsideWorkHours(time: string): boolean {
+  return time < `${pad(WORK_START)}:00` || time > `${pad(WORK_END)}:00`;
+}
+
 const pad = (n: number) => String(n).padStart(2, '0');
 const hhmm = (h: number, m: number) => `${pad(h)}:${pad(m)}`;
 

@@ -3,6 +3,8 @@ import { normalize } from './normalize';
 import { parseWhen } from './dates';
 import { parseBareHour } from './time';
 import { parsePhone } from './phone';
+import { matchService } from '../services/slots';
+import { refineWithLlm } from './lm';
 
 /**
  * Разбор реплики: интент и слоты.
@@ -28,28 +30,13 @@ export type Nlu = {
   phoneStatus?: 'ok' | 'partial' | 'too_long';  // что с номером: готов / копим / заново
 };
 
-/** До дня 8 словарь услуг живёт в таблице services (services.synonyms), здесь временная копия. */
-export const SERVICE_TITLES: Record<string, string> = {
-  haircut: 'Мужская стрижка',
-  beard: 'Оформление бороды',
-  combo: 'Стрижка + борода',
-  kids: 'Детская стрижка',
-  shave: 'Королевское бритьё',
-  styling: 'Укладка',
-};
+/**
+ * Словарь услуг и имена мастеров живут в БД (services.synonyms, masters) —
+ * см. services/slots.ts. Здесь только то, что нужно автомату.
+ */
+export const norm = normalize;   // алиас для кода дней 2–3
 
-export const serviceTitle = (code?: string): string | undefined => (code ? SERVICE_TITLES[code] : undefined);
-
-const SERVICE_BASES: Array<[string, string]> = [
-  ['детск', 'kids'],
-  ['брит', 'shave'],
-  ['комплекс', 'combo'],
-  ['кладк', 'styling'],
-  ['бород', 'beard'],
-  ['стрижк', 'haircut'],
-];
-
-const MASTER_NAMES = ['артем', 'руслан', 'диана'];
+const todayOf = (now: Date) => new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
 const MONTHS = [
   'января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
@@ -64,20 +51,6 @@ const YES = new Set([
 const NO = new Set([
   'нет', 'неа', 'не', 'не нет', 'не согласен', 'не согласна', 'no', 'nope', 'не хочу',
 ]);
-
-export const norm = normalize;   // алиас для кода дней 2–3
-
-const todayOf = (now: Date) => new Date(now.getFullYear(), now.getMonth(), now.getDate());
-
-export function matchService(text: string): string | undefined {
-  const has = (base: string) => text.includes(base);
-  if (has('стрижк') && has('бород')) return 'combo';
-  for (const [base, code] of SERVICE_BASES) if (has(base)) return code;
-  return undefined;
-}
-
-export const matchMaster = (text: string): string | undefined =>
-  MASTER_NAMES.find((name) => text.includes(name));
 
 const FAQ_RE = /(сколько стоит|стоимост|цена|цены|прайс|адрес|где вы|находитесь|как работаете|когда работаете|правил|открыт|работаете ли|что входит)/;
 
@@ -133,7 +106,9 @@ export async function understand(ctx: Ctx, text: string, now: Date): Promise<Nlu
   // «стрижка» без глагола — тоже намерение записаться
   if (nlu.intent === 'unknown' && nlu.service) nlu.intent = 'booking';
 
-  return nlu;
+  // Правила отработали: если реплика сложная, модель добирает недостающее
+  // (день 10). Её ответ проходит проверку и не перезаписывает правила.
+  return refineWithLlm(nlu, text, ctx, now);
 }
 
 /** «сегодня», «завтра», «во вторник, 20 октября». */

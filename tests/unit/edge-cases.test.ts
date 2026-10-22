@@ -1,8 +1,43 @@
-import { it, expect, describe } from 'vitest';
+import { it, expect, describe, beforeAll, vi } from 'vitest';
 import { step } from '../../src/dialog/machine';
 import { newCtx } from '../../src/dialog/states';
+import { FIXTURE_SLOTS, useFixtureCatalog } from './fixtures';
+
+// Слоты считает БД, а юнит-тесты не должны зависеть от живой базы.
+const { findSlotsMock, nearestSlotsMock } = vi.hoisted(() => ({
+  findSlotsMock: vi.fn(),
+  nearestSlotsMock: vi.fn(),
+}));
+
+vi.mock('../../src/services/slots', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/services/slots')>();
+  return { ...actual, findSlots: findSlotsMock, nearestSlots: nearestSlotsMock };
+});
+
+// Реальный вызов LLM в юнит-тестах недопустим: правила справляются сами.
+vi.mock('../../src/services/llm', () => ({
+  complete: vi.fn(async () => { throw new Error('LLM выключен в тестах'); }),
+  tryJson: (s: string) => null,
+  stats: { llmCalls: 0 },
+}));
 
 const NOW = new Date(2026, 9, 20, 12, 0);   // вторник, 20 октября 2026
+
+beforeAll(() => {
+  useFixtureCatalog();
+  findSlotsMock.mockImplementation(async (
+    _service: string | undefined,
+    _date: string | undefined,
+    _now: Date,
+    opts: { range?: { from: string; to: string }; masterId?: number } = {},
+  ) => {
+    let slots = FIXTURE_SLOTS;
+    if (opts.masterId) slots = slots.filter((s) => s.masterId === opts.masterId);
+    if (opts.range) slots = slots.filter((s) => s.time >= opts.range!.from && s.time < opts.range!.to);
+    return slots;
+  });
+  nearestSlotsMock.mockResolvedValue([]);
+});
 
 /** Прогоняет реплики через автомат и собирает всё, что сказал бот. */
 async function play(lines: string[]) {
