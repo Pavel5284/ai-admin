@@ -1,4 +1,4 @@
-import { it, expect, describe, beforeAll, vi } from 'vitest';
+import { it, expect, describe, beforeAll, beforeEach, vi } from 'vitest';
 import { step } from '../../src/dialog/machine';
 import { newCtx } from '../../src/dialog/states';
 import { FIXTURE_SLOTS, useFixtureCatalog } from './fixtures';
@@ -17,11 +17,21 @@ vi.mock('../../src/services/slots', async (importOriginal) => {
 // Реальный вызов LLM в юнит-тестах недопустим: правила справляются сами.
 vi.mock('../../src/services/llm', () => ({
   complete: vi.fn(async () => { throw new Error('LLM выключен в тестах'); }),
-  tryJson: (s: string) => null,
+  tryJson: () => null,
   stats: { llmCalls: 0 },
 }));
 
+// База знаний тестовая: ответ выдаёт заглушка, сеть и БД не трогаются.
+const { answerKbMock } = vi.hoisted(() => ({ answerKbMock: vi.fn() }));
+vi.mock('../../src/services/kb', () => ({ answerKb: answerKbMock }));
+
 const NOW = new Date(2026, 9, 20, 12, 0);   // вторник, 20 октября 2026
+
+const KB_ANSWER = {
+  answerable: true,
+  answer: 'Мужская стрижка стоит 2000 ₽ и занимает около 60 минут.',
+  best: null,
+};
 
 beforeAll(() => {
   useFixtureCatalog();
@@ -37,6 +47,11 @@ beforeAll(() => {
     return slots;
   });
   nearestSlotsMock.mockResolvedValue([]);
+});
+
+beforeEach(() => {
+  answerKbMock.mockReset();
+  answerKbMock.mockResolvedValue(KB_ANSWER);   // по умолчанию база отвечает; отдельные тесты переопределяют
 });
 
 /** Прогоняет реплики через автомат и собирает всё, что сказал бот. */
@@ -91,17 +106,33 @@ describe('нештатные ситуации', () => {
     expect(ctx.state).toBe('ASK_DATE');
   });
 
-  it('вопрос не по теме: ответили и предложили продолжить', async () => {
+  it('вопрос посреди записи: ответ из базы и предложение продолжить', async () => {
     const { ctx, said } = await play(['хочу записаться', 'стрижка', 'сколько стоит стрижка?']);
-    expect(said).toContain('Уточню у администратора');
+    expect(said).toContain('2000 ₽');
     expect(said).toMatch(/Продолжим запись|Вернёмся к записи/);
     expect(ctx.state).toBe('RESUME');
+    expect(ctx.outcome).toBe('faq_answered');
   });
 
-  it('вопрос не по теме: после «да» вернулись к вопросу о дате', async () => {
+  it('вопрос посреди записи: после «да» вернулись к вопросу о дате', async () => {
     const { ctx, said } = await play(['хочу записаться', 'стрижка', 'сколько стоит стрижка?', 'да']);
     expect(said).toContain('На какой день');
     expect(ctx.state).toBe('ASK_DATE');
+  });
+
+  it('вопрос посреди записи: в базе ответа нет — оператор, потом продолжаем', async () => {
+    answerKbMock.mockResolvedValueOnce({ answerable: false, answer: '', best: null });
+    const { ctx, said } = await play(['хочу записаться', 'стрижка', 'сколько стоит татуировка?']);
+    expect(said).toContain('Уточню у администратора');
+    expect(ctx.state).toBe('RESUME');
+  });
+
+  it('второй вопрос посреди записи: цель возврата не теряется', async () => {
+    answerKbMock.mockResolvedValue({ answerable: true, answer: 'Ответ из базы.', best: null });
+    const { ctx, said } = await play(['хочу записаться', 'стрижка', 'сколько стоит?', 'где вы находитесь?']);
+    expect(said.match(/Продолжим запись|Вернёмся к записи/g)?.length).toBe(2);
+    expect(ctx.resume).toBe('ASK_DATE');
+    expect(ctx.state).toBe('RESUME');
   });
 
   it('передумал: отмена с подтверждением', async () => {
@@ -119,7 +150,7 @@ describe('нештатные ситуации', () => {
 
   it('две просьбы в одной реплике: сначала вопрос, потом запись', async () => {
     const { ctx, said } = await play(['хочу записаться на стрижку, сколько стоит стрижка?']);
-    expect(said).toContain('Уточню у администратора');
+    expect(said).toContain('2000 ₽');
     expect(ctx.state).toBe('RESUME');
   });
 

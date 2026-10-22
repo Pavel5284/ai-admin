@@ -11,8 +11,6 @@ import {
   cancelBooking, createBooking, findBookingsByPhone, findSlots, loadCatalog, rescheduleBooking,
 } from '../../src/services/slots';
 
-let dbReady = false;
-
 const NOW = new Date();
 const tomorrow = (() => {
   const d = new Date(NOW.getFullYear(), NOW.getMonth(), NOW.getDate() + 1);
@@ -35,12 +33,8 @@ const dbAvailable = await (async () => {
 
 beforeAll(async () => {
   if (!dbAvailable) return;
-  try {
-    await loadCatalog();
-    dbReady = true;
-  } catch {
-    dbReady = false;
-  }
+  // Каталог нужен матчингу услуг; сбор его провала покажут сами тесты ниже.
+  await loadCatalog().catch(() => undefined);
 });
 
 afterAll(async () => {

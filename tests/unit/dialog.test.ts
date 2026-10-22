@@ -19,14 +19,25 @@ vi.mock('../../src/services/slots', async (importOriginal) => {
 // а модель здесь всегда отвечает ошибкой (экстрактор это молча пропускает).
 vi.mock('../../src/services/llm', () => ({
   complete: vi.fn(async () => { throw new Error('LLM выключен в тестах'); }),
-  tryJson: (s: string) => null,
+  tryJson: () => null,
   stats: { llmCalls: 0 },
 }));
+
+// База знаний тоже тестовая: автомату заранее отдаём готовый ответ,
+// поиска по эмбеддингам и сети нет. Отказ базы — тесты на отказ ниже.
+const { answerKbMock } = vi.hoisted(() => ({ answerKbMock: vi.fn() }));
+vi.mock('../../src/services/kb', () => ({ answerKb: answerKbMock }));
 
 const NOW = new Date(2026, 9, 20, 12, 0);   // вторник, 20 октября 2026
 
 beforeAll(() => {
   useFixtureCatalog();
+  // Известный ответ по базе для всех FAQ-тестов этого файла.
+  answerKbMock.mockResolvedValue({
+    answerable: true,
+    answer: 'Мужская стрижка стоит 2000 ₽ и занимает около 60 минут.',
+    best: null,
+  });
   findSlotsMock.mockImplementation(async (
     _service: string | undefined,
     _date: string | undefined,
@@ -125,7 +136,7 @@ describe('основной диалог', () => {
   });
 
   it('«повторите» повторяет последнюю реплику бота', async () => {
-    const { ctx, said } = await play(['хочу записаться', 'повторите']);
+    const { said } = await play(['хочу записаться', 'повторите']);
     expect(said.match(/На какую услугу/g)?.length).toBe(2);
   });
 
@@ -156,5 +167,41 @@ describe('основной диалог', () => {
     expect(said).toContain('день');
     expect(ctx.state).toBe('ASK_DATE');
     expect(ctx.slots.service).toBe('haircut');
+  });
+});
+
+describe('база знаний (дни 12–13)', () => {
+  it('вопрос в начале диалога: ответ из базы и приглашение к действию', async () => {
+    const { ctx, said } = await play(['сколько стоит стрижка?']);
+    expect(said).toContain('2000 ₽');
+    expect(said).toContain('Чем ещё помочь');
+    expect(ctx.state).toBe('FAQ');
+    expect(ctx.outcome).toBe('faq_answered');
+  });
+
+  it('после ответа «запишите» — начинается обычная запись', async () => {
+    const { ctx, said } = await play(['сколько стоит стрижка?', 'запишите меня']);
+    expect(ctx.state).toBe('ASK_SERVICE');
+    expect(said).toContain('На какую услугу');   // услуга названа раньше — ждём следующего слота
+  });
+
+  it('после ответа «нет» — диалог вежливо закрывается', async () => {
+    const { ctx, said } = await play(['сколько стоит стрижка?', 'нет']);
+    expect(said).toContain('До свидания');
+    expect(ctx.state).toBe('DONE');
+  });
+
+  it('в FAQ можно задать ещё один вопрос — отвечает база знаний', async () => {
+    const { said } = await play(['где вы работаете?', 'а сколько стоит борода?']);
+    expect(said).toContain('2000 ₽');
+    expect(said).toContain('Чем ещё помочь');
+  });
+
+  it('ответа в базе нет — честное «уточню», задача оператору создана', async () => {
+    answerKbMock.mockResolvedValueOnce({ answerable: false, answer: '', best: null });
+    const { ctx, said } = await play(['сколько стоит татуировка?']);
+    expect(said).toContain('Уточню у администратора');
+    expect(ctx.state).toBe('HANDOFF');
+    expect(ctx.outcome).toBe('faq_declined');
   });
 });

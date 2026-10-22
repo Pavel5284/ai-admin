@@ -6,9 +6,10 @@ import {
 import { formatDate, hasFaqQuestion, understand, type Nlu } from '../nlu/intent';
 import { dateIssue, isoDate } from '../nlu/dates';
 import { outsideWorkHours } from '../nlu/time';
+import { answerKb } from '../services/kb';
 import {
   findBookingsByPhone, findSlots, matchMaster, masterById, nearestSlots, serviceTitle,
-  type Booking, type FreeSlot,
+  type FreeSlot,
 } from '../services/slots';
 
 type Handler = (ctx: Ctx, nlu: Nlu, now: Date) => StepResult | Promise<StepResult>;
@@ -35,10 +36,11 @@ export async function step(ctx: Ctx, ev: BotEvent, now: Date): Promise<StepResul
   // 3. обычный текст: NLU, затем обработчик текущего состояния
   const nlu = await understand(ctx, ev.text, now);
 
-  // Клиент задал вопрос посреди записи — отвечаем и возвращаем его туда, где он был.
-  if (nlu.intent === 'faq' && ctx.state !== 'INTENT' && ctx.state !== 'FAQ' && ctx.state !== 'RESUME') {
-    ctx.resume = ctx.state;
-    return commit(ctx, ev, { ...faqAnswer(ctx), nlu }, now);
+  // Клиент задал вопрос посреди записи — отвечаем из базы знаний и предлагаем продолжить.
+  if (nlu.intent === 'faq' && ctx.state !== 'INTENT' && ctx.state !== 'FAQ') {
+    // START: бот ещё ничего не спрашивал, возвращаться некуда. RESUME: цель уже сохранена.
+    if (ctx.state !== 'START' && ctx.state !== 'RESUME') ctx.resume = ctx.state;
+    return commit(ctx, ev, { ...await faqAnswer(ctx, ev.text), nlu }, now);
   }
 
   // Дата вне горизонта записи: слот не заполняем, а уточняем у клиента.
@@ -171,7 +173,7 @@ function pickBooking<T extends { id: number; time: string }>(
 }
 
 /** Запись найдена: дальше — отмена или перенос. */
-function afterBookingFound(ctx: Ctx, booking: BookingRef, now: Date): StepResult {
+function afterBookingFound(ctx: Ctx, booking: BookingRef): StepResult {
   if (ctx.pending === 'reschedule') {
     // Перенос: та же услуга и мастер, новая дата и время.
     ctx.slots.service = booking.serviceCode;
@@ -228,14 +230,30 @@ function askAgain(ctx: Ctx, state: StateId): StepResult {
 }
 
 /**
- * Ответ на вопрос клиента.
- * Заглушка до дня 12: базы знаний ещё нет, поэтому ответа не будет.
- * Если клиент отвлёкся вопросом посреди записи — предлагаем продолжить.
+ * Ответ на вопрос клиента по базе знаний (день 12–13).
+ * Есть ответ в базе — отвечаем фрагментами, защитных выдумок в ответе нет:
+ * `answerKb` проверяет порог, схему и числа. Ответа нет — честное «уточню у
+ * администратора» и задача оператору. Если клиент отвлёкся вопросом посреди
+ * записи — предлагаем продолжить.
  */
-function faqAnswer(ctx: Ctx): StepResult {
+async function faqAnswer(ctx: Ctx, question: string): Promise<StepResult> {
+  const kb = await answerKb(question).catch(() => ({ answerable: false, answer: '', best: null }));
+
+  if (kb.answerable && kb.answer) {
+    ctx.outcome = 'faq_answered';
+    if (ctx.resume) {                      // вопрос посреди записи: возвращаемся к прерванному
+      ctx.state = 'RESUME';
+      ctx.lastAsked = 'RESUME';
+      return { ctx, say: [kb.answer, ...pick(ctx, R.continueBooking)], actions: [] };
+    }
+    ctx.state = 'FAQ';                     // ответили в начале диалога: слушаем дальше сами
+    ctx.lastAsked = 'FAQ';
+    ctx.retries.FAQ = 0;
+    return { ctx, say: [kb.answer, ...pick(ctx, R.afterFaq)], actions: [] };
+  }
+
   ctx.outcome = 'faq_declined';
   const actions: Action[] = [{ type: 'handoff', reason: 'faq_not_found' }];
-
   if (ctx.resume) {
     ctx.state = 'RESUME';
     ctx.lastAsked = 'RESUME';
@@ -270,9 +288,9 @@ const handlers: Record<StateId, Handler> = {
     // Две просьбы в одной реплике: сначала вопрос, потом запись.
     if (nlu.intent === 'booking' && hasFaqQuestion(nlu.text)) {
       ctx.resume = 'INTENT';
-      return faqAnswer(ctx);
+      return faqAnswer(ctx, nlu.text);
     }
-    if (nlu.intent === 'faq') return faqAnswer(ctx);
+    if (nlu.intent === 'faq') return faqAnswer(ctx, nlu.text);
     if (nlu.intent === 'booking') return advance(ctx, now);
     return misunderstood(ctx, 'INTENT');
   },
@@ -459,7 +477,7 @@ const handlers: Record<StateId, Handler> = {
     return misunderstood(ctx, 'CONFIRM');
   },
 
-  FIND_BOOKING: async (ctx, nlu, now) => {
+  FIND_BOOKING: async (ctx, nlu, _now) => {
     absorb(ctx, nlu);
 
     // Клиент выбирает одну из нескольких найденных записей.
@@ -468,7 +486,7 @@ const handlers: Record<StateId, Handler> = {
       if (!chosen) return misunderstood(ctx, 'FIND_BOOKING');
       ctx.bookingId = chosen.id;
       ctx.bookings = undefined;
-      return afterBookingFound(ctx, chosen, now);
+      return afterBookingFound(ctx, chosen);
     }
 
     if (!ctx.slots.phone) {
@@ -497,10 +515,22 @@ const handlers: Record<StateId, Handler> = {
       return goto(ctx, 'FIND_BOOKING', [`Нашёл несколько записей: ${list}. Какую переносим или отменяем?`]);
     }
     ctx.bookingId = bookings[0].id;
-    return afterBookingFound(ctx, bookings[0], now);
+    return afterBookingFound(ctx, bookings[0]);
   },
 
-  FAQ: (ctx) => faqAnswer(ctx),
+  /**
+   * Разговор после ответа из базы знаний. Обычные просьбы ведут себя как в
+   * INTENT, вопрос — снова через базу знаний, вежливый «нет» завершает диалог.
+   */
+  FAQ: async (ctx, nlu, now) => {
+    if (nlu.no) {
+      ctx.state = 'DONE';
+      return { ctx, say: pick(ctx, R.goodbye), actions: [] };
+    }
+    if (nlu.yes) return advance(ctx, now);      // «да, запишите» — начинаем запись с услуги
+    if (nlu.intent === 'faq') return faqAnswer(ctx, nlu.text);
+    return handlers.INTENT(ctx, nlu, now);      // «запишите», «перенесите» — как обычный интент
+  },
 
   HANDOFF: (ctx) => {
     const already = ctx.outcome === 'handoff' || ctx.outcome === 'faq_declined';
