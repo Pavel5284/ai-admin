@@ -1,5 +1,5 @@
-import { it, expect, describe } from 'vitest';
-import { findNumbers, wordsToDigits } from '../../src/nlu/numbers';
+﻿import { it, expect, describe } from 'vitest';
+import { findNumbers, wordsToDigits } from '../src/numbers';
 
 describe('wordsToDigits', () => {
   it.each([

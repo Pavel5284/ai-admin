@@ -1,6 +1,6 @@
-import { it, expect, describe } from 'vitest';
-import { parseWhen } from '../../src/nlu/dates';
-import { normalize } from '../../src/nlu/normalize';
+﻿import { it, expect, describe } from 'vitest';
+import { parseWhen } from '../src/dates';
+import { normalize } from '../src/normalize';
 
 const NOW = new Date(2026, 9, 15, 12, 0);   // четверг, 15 октября 2026 (месяц с нуля!)
 
@@ -23,6 +23,8 @@ describe('parseWhen', () => {
     ['23.10.2027', { date: '2027-10-23' }],
     ['23 числа', { date: '2026-10-23' }],
     ['23 октября', { date: '2026-10-23' }],
+    ['шестнадцатое октября', { date: '2026-10-16' }],
+    ['пятнадцатого октября', { date: '2026-10-15' }],
     // дни недели
     ['в среду', { date: '2026-10-21' }],
     ['в пятницу', { date: '2026-10-16' }],

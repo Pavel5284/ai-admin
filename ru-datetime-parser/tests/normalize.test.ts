@@ -1,5 +1,5 @@
-import { it, expect, describe } from 'vitest';
-import { normalize, wb } from '../../src/nlu/normalize';
+﻿import { it, expect, describe } from 'vitest';
+import { normalize, wb } from '../src/normalize';
 
 describe('normalize', () => {
   it.each([
@@ -19,6 +19,8 @@ describe('normalize', () => {
     // ошибки распознавания
     ['назавтра', 'на завтра'],
     ['во скок', 'во сколько'],
+    ['мужскуюстрижку', 'мужскую стрижку'],
+    ['двеси тридцать четыре', '234'],
     // числительные
     ['в шесть вечера', 'в 6 вечера'],
     ['двадцать три', '23'],

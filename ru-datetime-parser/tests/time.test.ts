@@ -1,6 +1,6 @@
-import { it, expect, describe } from 'vitest';
-import { parseBareHour, parseTimeRules } from '../../src/nlu/time';
-import { normalize } from '../../src/nlu/normalize';
+﻿import { it, expect, describe } from 'vitest';
+import { parseBareHour, parseTimeRules } from '../src/time';
+import { normalize } from '../src/normalize';
 
 const when = (text: string) => parseTimeRules(normalize(text));
 

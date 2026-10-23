@@ -1,0 +1,35 @@
+{
+  "name": "ru-datetime-parser",
+  "version": "1.0.0",
+  "description": "Разбор русских дат, времени и телефонов из речи: правила, числительные, ASR-исправления.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc",
+    "demo": "tsx examples/demo.ts"
+  },
+  "keywords": [
+    "russian",
+    "nlu",
+    "datetime",
+    "phone",
+    "asr",
+    "typescript"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  }
+}

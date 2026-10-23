@@ -1,5 +1,5 @@
-import { it, expect, describe } from 'vitest';
-import { parsePhone, toE164 } from '../../src/nlu/phone';
+﻿import { it, expect, describe } from 'vitest';
+import { parsePhone, toE164 } from '../src/phone';
 
 describe('parsePhone', () => {
   it.each([
@@ -19,6 +19,8 @@ describe('parsePhone', () => {
     ['восемь девятьсот шестнадцать два три четыре пять шесть семь восемь', '+79162345678'],
     ['+7 916 234 56 78', '+79162345678'],
     ['(916) 234-56-78', '+79162345678'],
+    // «номер» + номер словами: часы из начала реплики не должны попасть в телефон
+    ['в шесть вечера, номер восемь девятьсот шестнадцать двести тридцать четыре пятьдесят шесть семьдесят восемь', '+79162345678'],
   ])('%s → %s', (input, phone) => {
     expect(parsePhone(input)).toEqual({ status: 'ok', phone });
   });

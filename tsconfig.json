@@ -9,5 +9,5 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["src", "tests", "scripts"]
+  "include": ["src", "tests", "scripts", "ru-datetime-parser/src", "ru-datetime-parser/tests", "ru-datetime-parser/examples"]
 }
