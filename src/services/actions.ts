@@ -11,6 +11,8 @@ export async function executeActions(ctx: Ctx, actions: Action[]): Promise<strin
       if (!r.ok) {
         extra.push('К сожалению, это время только что заняли. Давайте выберем другое.');
         ctx.state = 'OFFER_SLOTS';
+        // Запись не создана — «booked» здесь был бы ложью и испортил бы метрику.
+        delete ctx.outcome;
         continue;
       }
       try {
@@ -32,6 +34,20 @@ export async function executeActions(ctx: Ctx, actions: Action[]): Promise<strin
         extra.push(r.reason === 'slot_taken'
           ? 'Это время только что заняли. Давайте выберем другое.'
           : 'Не удалось перенести запись. Позвоните администратору.');
+        if (r.reason === 'slot_taken') {
+          // Возвращаемся к выбору окна, сохраняя запись и режим переноса:
+          // иначе следующее «да» создаст новую запись вместо переноса.
+          ctx.state = 'OFFER_SLOTS';
+          ctx.pending = 'reschedule';
+          ctx.bookingId = a.id;
+          delete ctx.outcome;
+        } else {
+          delete ctx.outcome;
+        }
+      } else {
+        // Перенос удался: старую запись больше не держим в контексте.
+        delete ctx.pending;
+        delete ctx.bookingId;
       }
     }
     if (a.type === 'handoff') {

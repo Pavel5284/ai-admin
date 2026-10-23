@@ -205,3 +205,47 @@ describe('база знаний (дни 12–13)', () => {
     expect(ctx.outcome).toBe('faq_declined');
   });
 });
+
+describe('выбор окна и вопросы посреди записи', () => {
+  it('«первый» в списке окон — выбор, а не первое число месяца', async () => {
+    const { ctx } = await play(['здравствуйте', 'стрижка', 'завтра', 'после обеда', 'первый']);
+    expect(ctx.state).toBe('ASK_CONTACT');
+    expect(ctx.slots.date).toBe('2026-10-21');
+    expect(ctx.slots.time).toBe('13:00');
+  });
+
+  it('дата и диапазон в одной реплике сразу показывают окна, а не спрашивают телефон', async () => {
+    const { ctx, said } = await play(['здравствуйте', 'мне бы завтра после обеда', 'стрижка']);
+    expect(ctx.slots.date).toBe('2026-10-21');
+    expect(ctx.slots.timeRange).toEqual({ from: '13:00', to: '17:00' });
+    expect(ctx.state).toBe('OFFER_SLOTS');
+    expect(said).toContain('Свободное время');
+  });
+
+  it('«Можно ли прийти без записи?» — вопрос, а не запись', async () => {
+    const { ctx, said } = await play(['Можно ли прийти без записи?']);
+    expect(ctx.state).toBe('FAQ');
+    expect(ctx.outcome).toBe('faq_answered');
+    expect(said).toContain('2000 ₽');
+  });
+
+  it('«За сколько часов можно отменить?» — вопрос о правилах, а не отмена', async () => {
+    const { ctx } = await play(['За сколько часов можно отменить запись?']);
+    expect(ctx.state).toBe('FAQ');
+    expect(ctx.outcome).toBe('faq_answered');
+    expect(ctx.pending).toBeUndefined();
+  });
+
+  it('цена в одной реплике с записью: сначала ответ, потом продолжение', async () => {
+    const { ctx, said } = await play(['хочу записаться на стрижку и узнать цену']);
+    expect(ctx.state).toBe('RESUME');
+    expect(said).toContain('2000 ₽');
+    expect(said).toContain('Продолжим запись');
+  });
+
+  it('«во сколько можно записаться» — это время записи, а не часы работы', async () => {
+    const { ctx } = await play(['хочу подстричся во скок можно завтра']);
+    expect(ctx.state).toBe('ASK_TIME');
+    expect(ctx.slots.date).toBe('2026-10-21');
+  });
+});

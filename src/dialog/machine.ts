@@ -81,32 +81,56 @@ function commit(ctx: Ctx, ev: BotEvent, res: StepResult, now: Date): StepResult 
 /** Попутно принимаем слоты, о которых клиент заговорил про запрошенный. */
 function absorb(ctx: Ctx, nlu: Nlu): void {
   const s = ctx.slots;
-  if (!s.service && nlu.service) s.service = nlu.service;
-  if (!s.date && nlu.date) s.date = nlu.date;
-  // Конкретное время заменяет диапазон и наоборот: последнее сказанное — главное.
-  if (nlu.time) {
-    s.time = nlu.time;
-    delete s.timeRange;
-  } else if (nlu.timeRange) {
-    s.timeRange = nlu.timeRange;
-    delete s.time;
+  // В ASK_CONTACT клиент диктует телефон, а цифры и слова «восемь», «два»
+  // парсер дат легко принимает за день месяца. Такой ход не должен
+  // перезаписывать уже выбранные услугу, дату и время.
+  const phoneTurn = (ctx.state === 'ASK_CONTACT' || ctx.state === 'FIND_BOOKING')
+    && (nlu.phone != null || nlu.digits != null || nlu.phoneStatus != null);
+  // «Первый», «2», «третий» — это выбор из списка, а не дата. Парсер дат
+  // иначе честно увидит в «первый» первое число следующего месяца.
+  const choiceTurn = (ctx.state === 'OFFER_SLOTS'
+    || (ctx.state === 'FIND_BOOKING' && !!ctx.bookings?.length && !ctx.bookingId))
+    && /^(?:[1-3]|один|два|три|перв\p{L}*|втор\p{L}*|трет\p{L}*)$/u.test(nlu.text.trim());
+  if (!phoneTurn) {
+    // Услуга и дата, как и время, — «последнее сказанное главнее»: клиент может
+    // передумать посреди записи («ой нет, лучше в субботу») или поправить слот.
+    if (nlu.service) s.service = nlu.service;
+    if (nlu.date && !choiceTurn) s.date = nlu.date;
+    // Конкретное время заменяет диапазон и наоборот: последнее сказанное — главное.
+    if (nlu.time) {
+      s.time = nlu.time;
+      delete s.timeRange;
+    } else if (nlu.timeRange) {
+      s.timeRange = nlu.timeRange;
+      delete s.time;
+    }
+    // Мастер — тоже слот: «к Артёму» можно сказать в любой момент диалога.
+    if (/(любому|любой|неважно|все равно|кто свободен)/.test(nlu.text)) delete s.masterId;
+    else {
+      const master = matchMaster(nlu.text);
+      if (master) s.masterId = master.id;
+    }
   }
   if (!s.phone && nlu.phone) s.phone = nlu.phone;
   if (!s.name && nlu.name) s.name = nlu.name;
-  // Мастер — тоже слот: «к Артёму» можно сказать в любой момент диалога.
-  if (/(любому|любой|неважно|все равно|кто свободен)/.test(nlu.text)) delete s.masterId;
-  else {
-    const master = matchMaster(nlu.text);
-    if (master) s.masterId = master.id;
-  }
 }
 
 /** После каждой реплики смотрим, какого слота не хватает, и спрашиваем про первый. */
-function advance(ctx: Ctx, now: Date): StepResult {
+async function advance(ctx: Ctx, now: Date): Promise<StepResult> {
   const s = ctx.slots;
   if (!s.service) return goto(ctx, 'ASK_SERVICE', R.askService);
   if (!s.date) return goto(ctx, 'ASK_DATE', R.askDate);
-  if (!s.time && !s.timeRange) return goto(ctx, 'ASK_TIME', R.askTime);
+  // «Завтра после обеда» — это ещё не конкретное время. Сразу показываем
+  // подходящие окна, а не спрашиваем телефон: иначе клиент подтвердит
+  // запись, которой нет.
+  if (!s.time && s.timeRange) {
+    const inRange = await findSlots(s.service, s.date, now, {
+      range: s.timeRange, masterId: s.masterId,
+    });
+    if (inRange.length) return offerSlots(ctx, inRange, now);
+    return offerOtherDays(ctx, now);
+  }
+  if (!s.time) return goto(ctx, 'ASK_TIME', R.askTime);
   if (!s.phone) return goto(ctx, 'ASK_CONTACT', R.askPhone);
   return confirmAsk(ctx, now);
 }
@@ -269,12 +293,15 @@ const handlers: Record<StateId, Handler> = {
     const hello = pick(ctx, R.greet);
     ctx.state = 'INTENT';
     ctx.lastAsked = 'INTENT';
+    // Даже если смысл реплики не понят, названные дату/время/услугу не теряем:
+    // «мне бы завтра после обеда» — это уже полезные слоты для следующего шага.
+    absorb(ctx, nlu);
     if (nlu.intent === 'unknown') return { ctx, say: hello, actions: [] };
     const res = await handlers.INTENT(ctx, nlu, now);
     return { ctx: res.ctx, say: [...hello, ...res.say], actions: res.actions };
   },
 
-  INTENT: (ctx, nlu, now) => {
+  INTENT: async (ctx, nlu, now) => {
     absorb(ctx, nlu);
     if (nlu.intent === 'handoff') return handoff(ctx, 'client_asked_operator');
     if (nlu.intent === 'reschedule') {
@@ -295,7 +322,7 @@ const handlers: Record<StateId, Handler> = {
     return misunderstood(ctx, 'INTENT');
   },
 
-  ASK_SERVICE: (ctx, nlu, now) => {
+  ASK_SERVICE: async (ctx, nlu, now) => {
     absorb(ctx, nlu);
     if (nlu.service) {
       ctx.slots.service = nlu.service;
@@ -306,12 +333,12 @@ const handlers: Record<StateId, Handler> = {
     return misunderstood(ctx, 'ASK_SERVICE');
   },
 
-  ASK_MASTER: (ctx, nlu, now) => {
+  ASK_MASTER: async (ctx, nlu, now) => {
     absorb(ctx, nlu);              // названного мастера absorb уже записал
     return advance(ctx, now);      // если мастер не назван — берём любого свободного
   },
 
-  ASK_DATE: (ctx, nlu, now) => {
+  ASK_DATE: async (ctx, nlu, now) => {
     absorb(ctx, nlu);
     if (nlu.date) {
       ctx.slots.date = nlu.date;
@@ -366,7 +393,7 @@ const handlers: Record<StateId, Handler> = {
     return offerSlots(ctx, free, now);
   },
 
-  ASK_CONTACT: (ctx, nlu, now) => {
+  ASK_CONTACT: async (ctx, nlu, now) => {
     absorb(ctx, nlu);
     if (nlu.phone) {
       ctx.slots.phone = nlu.phone;
@@ -387,7 +414,7 @@ const handlers: Record<StateId, Handler> = {
     return misunderstood(ctx, 'ASK_CONTACT');
   },
 
-  CONFIRM: (ctx, nlu, now) => {
+  CONFIRM: async (ctx, nlu, now) => {
     // «что изменить» — клиент называет, какой слот поправить
     if (ctx.pending === 'change') {
       if (/(услуг)/.test(nlu.text)) {
@@ -449,8 +476,9 @@ const handlers: Record<StateId, Handler> = {
           date: ctx.slots.date ?? '',
           time: ctx.slots.time ?? '',
         }];
-        ctx.pending = undefined;
-        ctx.bookingId = undefined;
+        // bookingId и pending остаются до успешного ответа CRM/БД: если слот
+        // заняли в последнюю секунду, executeActions вернёт нас в OFFER_SLOTS
+        // и сможет повторить перенос той же записи.
         ctx.outcome = 'rescheduled';
         ctx.state = 'DONE';
         return { ctx, say: pick(ctx, R.rescheduled), actions };
@@ -540,7 +568,7 @@ const handlers: Record<StateId, Handler> = {
     return { ctx, say: [], actions };
   },
 
-  RESUME: (ctx, nlu, now) => {
+  RESUME: async (ctx, nlu, now) => {
     const target = ctx.resume ?? 'INTENT';
     delete ctx.resume;
     if (nlu.no) {

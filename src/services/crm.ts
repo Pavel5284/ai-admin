@@ -2,7 +2,9 @@
 // Таймаут, повторы для «временных» сбоев (сеть, 5xx) и Idempotency-Key,
 // чтобы повтор после таймаута не создал дубль заявки.
 
-const BASE_URL = process.env.CRM_URL ?? 'http://localhost:4000';
+// URL читаем на каждый запрос, а не при импорте: eval-сценарии подменяют
+// CRM_URL на время одного диалога (сбой CRM), и клиент должен это увидеть.
+const baseUrl = (): string => (process.env.CRM_URL ?? 'http://localhost:4000').replace(/\/$/, '');
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export class CrmError extends Error {
@@ -17,7 +19,7 @@ async function request<T>(path: string, init: RequestInit = {}, retries = 2, tim
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), timeoutMs);
     try {
-      const res = await fetch(BASE_URL + path, { ...init, signal: ctrl.signal });
+      const res = await fetch(baseUrl() + path, { ...init, signal: ctrl.signal });
       if (res.ok) return (await res.json()) as T;
       if (res.status >= 500 && attempt < retries) { await sleep(200 * 2 ** attempt); continue; }
       throw new CrmError(res.status, await res.text());      // 4xx: повтор не поможет

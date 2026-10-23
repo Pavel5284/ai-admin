@@ -48,6 +48,20 @@ export async function embed(texts: string[], _kind: 'passage' | 'query' = 'passa
 
 export type KbChunk = { id: number; title: string; text: string; dist: number };
 
+/**
+ * Расширение запроса для слабых формулировок. Эмбеддинг «во сколько вы
+ * открываетесь?» уводит от фрагмента «Часы работы», хотя ответ в базе есть.
+ * Добавляем название темы только когда вопрос об этом явно спрашивает —
+ * это не ответ, а подсказка поиску; отвечает по-прежнему модель по фрагментам.
+ */
+export function expandQuery(question: string): string {
+  const t = question.toLowerCase();
+  if (/(?:во\s+сколько|до\s+скольки|когда\s+(?:вы\s+)?(?:открыва|закрыва|работа)|открыва|закрыва|часы\s+работы)/iu.test(t)) {
+    return question + ' часы работы барбершопа';
+  }
+  return question;
+}
+
 export async function searchKb(question: string, limit = 4): Promise<KbChunk[]> {
   const [vec] = await embed([question], 'query');
   const { rows } = await pool.query(
@@ -113,8 +127,24 @@ export async function answerKb(question: string): Promise<KbReply> {
   } catch {
     return declined(null);                             // БД или эмбеддинги недоступны — честный отказ
   }
-  const best = chunks[0] ?? null;
-  // Лучший фрагмент дальше порога: вопрос вне базы, модель даже не зовём.
+  let best = chunks[0] ?? null;
+  // Лучший фрагмент дальше порога: пробуем один раз расширить запрос
+  // (например, «во сколько открываетесь» → «часы работы»). Если и это
+  // не помогло — вопрос вне базы, модель даже не зовём.
+  if (!best || best.dist > distMax()) {
+    const expanded = expandQuery(question);
+    if (expanded !== question) {
+      try {
+        const alt = await searchKb(expanded);
+        if (alt[0] && (!best || alt[0].dist < best.dist)) {
+          chunks = alt;
+          best = alt[0];
+        }
+      } catch {
+        // эмбеддинги недоступны — остаётся честный отказ ниже
+      }
+    }
+  }
   if (!best || best.dist > distMax()) return declined(best);
 
   const raw = await complete({ system: SYSTEM, user: buildUser(question, chunks), maxTokens: 700 }).catch(() => null);
