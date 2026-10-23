@@ -1,0 +1,12 @@
+id: '073-booking-not-found'
+title: Записи по номеру нет — предлагаем записаться заново
+tags: [edge, not-found]
+split: dev
+now: '2026-10-15T12:00:00+03:00'
+turns:
+  - user: хочу отменить запись
+    expect: { state: FIND_BOOKING }
+  - user: 8 916 000 00 00
+    expect: { state: ASK_SERVICE, say_contains: 'Не нашёл запись' }
+final:
+  booking: none

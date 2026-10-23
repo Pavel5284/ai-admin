@@ -1,0 +1,14 @@
+id: '114-rag-down'
+title: Эмбеддинги недоступны, бот честно отказывается отвечать
+tags: [system-failure, faq, handoff-justified]
+split: dev
+now: '2026-10-15T12:00:00+03:00'
+env:
+  EMBED_API_KEY: 'invalid-key-for-test'
+  LLM_CACHE: '0'
+turns:
+  - user: Сколько стоит мужская стрижка?
+    expect: { state: HANDOFF, say_contains: 'Уточню у администратора' }
+final:
+  outcome: faq_declined
+  booking: none

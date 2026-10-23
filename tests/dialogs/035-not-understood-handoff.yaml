@@ -1,0 +1,17 @@
+id: '035-not-understood-handoff'
+title: Три непонимания подряд, перевод на оператора
+tags: [edge, not-understood, handoff-justified]
+split: dev
+now: '2026-10-15T12:00:00+03:00'
+turns:
+  - user: хочу на стрижку
+    expect: { state: ASK_DATE }
+  - user: ну когда-нибудь потом
+    expect: { state: ASK_DATE, say_contains: например }
+  - user: да как получится
+    expect: { state: ASK_DATE, say_contains: предложить }
+  - user: не знаю
+    expect: { say_contains: администратору }
+final:
+  outcome: handoff
+  booking: none

@@ -1,0 +1,19 @@
+id: '034b-dirty-generated-2'
+title: 'Запись одной фразой, искажённая ASR: склейка слов и «двеси»'
+tags: [booking, dirty]
+split: dev
+now: '2026-10-15T12:00:00+03:00'
+turns:
+  - user: здравствуйте хочу на мужскуюстрижку завтра в 18:00
+    expect:
+      slots: { service: haircut, date: '2026-10-16', time: '18:00' }
+      state: ASK_CONTACT
+  - user: плюс короче семь девятьсот шестнадцать двеси тридцать четыре пятьдесят шесть семьдесят восемь
+    expect:
+      slots: { phone: '+79162345678' }
+      state: CONFIRM
+  - user: да
+    expect: { state: DONE }
+final:
+  outcome: booked
+  booking: { service: haircut, date: '2026-10-16', time: '18:00' }

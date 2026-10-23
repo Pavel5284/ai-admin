@@ -1,0 +1,17 @@
+id: '003-kids-diana'
+title: Детская стрижка к Диане
+tags: [booking, perfect]
+split: dev
+now: '2026-10-15T12:00:00+03:00'
+turns:
+  - user: хочу записать сына на детскую стрижку к Диане в пятницу в 15:00
+    expect:
+      slots: { service: kids, masterId: 3, date: '2026-10-16', time: '15:00' }
+      state: ASK_CONTACT
+  - user: 8 916 234 56 78
+    expect: { slots: { phone: '+79162345678' }, state: CONFIRM }
+  - user: да
+    expect: { state: DONE }
+final:
+  outcome: booked
+  booking: { service: kids, date: '2026-10-16', time: '15:00' }

@@ -1,0 +1,12 @@
+id: '063-repeat-question'
+title: «Повторите» повторяет последний вопрос
+tags: [edge, repeat]
+split: dev
+now: '2026-10-15T12:00:00+03:00'
+turns:
+  - user: запишите меня
+    expect: { state: ASK_SERVICE }
+  - user: повторите
+    expect: { state: ASK_SERVICE, say_contains: 'На какую услугу' }
+final:
+  booking: none

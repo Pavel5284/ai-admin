@@ -1,0 +1,15 @@
+id: '081-cancel-declined'
+title: Клиент передумал отменять запись
+tags: [reschedule, cancel]
+split: dev
+now: '2026-10-15T12:00:00+03:00'
+turns:
+  - user: отмените мою запись
+    expect: { state: FIND_BOOKING }
+  - user: +7 916 000-00-02
+    expect: { state: CONFIRM }
+  - user: нет
+    expect: { state: ASK_SERVICE }
+final:
+  booking: none
+  existing: { phone: '+79160000002', status: confirmed, date: '2026-10-16', time: '14:00' }

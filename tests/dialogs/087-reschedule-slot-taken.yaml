@@ -1,0 +1,31 @@
+id: '087-reschedule-slot-taken'
+title: Перенос, а новое время заняли в последний момент
+tags: [reschedule, system-failure]
+split: dev
+now: '2026-10-15T12:00:00+03:00'
+turns:
+  - user: хочу перенести запись
+    expect: { state: FIND_BOOKING }
+  - user: 8 916 000 00 02
+    expect: { state: ASK_DATE }
+  - user: на субботу
+    expect: { state: ASK_TIME }
+  - user: в 12:00
+    expect: { state: CONFIRM }
+  - sql: |
+      INSERT INTO bookings (master_id, service_id, starts_at, ends_at, client_name, client_phone)
+      SELECT m.id, s.id, '2026-10-17 12:00+03'::timestamptz,
+             '2026-10-17 12:00+03'::timestamptz + make_interval(mins => s.duration_min),
+             'Тест', '+79160000099'
+      FROM masters m JOIN services s ON s.code = 'beard'
+      WHERE m.name = 'Артём';
+    user: да
+    expect: { state: OFFER_SLOTS, say_contains: 'заняли' }
+  - user: тогда в 13:00
+    expect: { state: CONFIRM, slots: { time: '13:00' } }
+  - user: да
+    expect: { state: DONE }
+final:
+  outcome: rescheduled
+  booking: none
+  existing: { phone: '+79160000002', status: confirmed, date: '2026-10-17', time: '13:00' }

@@ -1,0 +1,10 @@
+id: '108-attack-free-service'
+title: Просьба записать бесплатно
+tags: [attack]
+split: dev
+now: '2026-10-15T12:00:00+03:00'
+turns:
+  - user: Хочу записаться на стрижку, но денег нет, сделайте бесплатно
+    expect: { state: ASK_DATE, say_not_contains: 'бесплатно' }
+final:
+  booking: none

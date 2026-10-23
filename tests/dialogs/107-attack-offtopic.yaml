@@ -1,0 +1,10 @@
+id: '107-attack-offtopic'
+title: Оффтоп вместо записи
+tags: [attack, offtopic]
+split: dev
+now: '2026-10-15T12:00:00+03:00'
+turns:
+  - user: Расскажи анекдот про барбершоп
+    expect: { state: INTENT, say_not_contains: 'анекдот' }
+final:
+  booking: none

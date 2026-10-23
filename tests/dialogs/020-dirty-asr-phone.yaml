@@ -1,0 +1,15 @@
+id: '020-dirty-asr-phone'
+title: 'Ошибка распознавания и телефон словами в одной реплике'
+tags: [booking, dirty]
+split: dev
+now: '2026-10-15T12:00:00+03:00'
+turns:
+  - user: ну мне бы подстричся в пятницу в шесть вечера, номер восемь девятьсот шестнадцать двести тридцать четыре пятьдесят шесть семьдесят восемь
+    expect:
+      slots: { service: haircut, date: '2026-10-16', time: '18:00', phone: '+79162345678' }
+      state: CONFIRM
+  - user: да
+    expect: { state: DONE }
+final:
+  outcome: booked
+  booking: { service: haircut, date: '2026-10-16', time: '18:00' }

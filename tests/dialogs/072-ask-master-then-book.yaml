@@ -1,0 +1,23 @@
+id: '072-ask-master-then-book'
+title: Вопрос «к кому можно» и запись к любому мастеру
+tags: [edge, master]
+split: dev
+now: '2026-10-15T12:00:00+03:00'
+turns:
+  - user: хочу записаться, к кому можно?
+    expect: { state: ASK_MASTER, say_contains: 'К какому мастеру' }
+  - user: к любому
+    expect: { state: ASK_SERVICE }
+  - user: на стрижку
+    expect: { state: ASK_DATE }
+  - user: в субботу
+    expect: { state: ASK_TIME }
+  - user: в 15:00
+    expect: { state: ASK_CONTACT }
+  - user: 8 916 234 56 78
+    expect: { state: CONFIRM }
+  - user: да
+    expect: { state: DONE }
+final:
+  outcome: booked
+  booking: { service: haircut, date: '2026-10-17', time: '15:00' }

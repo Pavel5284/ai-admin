@@ -1,0 +1,17 @@
+id: '005-styling-tomorrow'
+title: Укладка без стрижки
+tags: [booking, perfect]
+split: dev
+now: '2026-10-15T12:00:00+03:00'
+turns:
+  - user: сделайте укладку завтра в 12:00
+    expect:
+      slots: { service: styling, date: '2026-10-16', time: '12:00' }
+      state: ASK_CONTACT
+  - user: восемь девятьсот шестнадцать двести тридцать четыре пятьдесят шесть семьдесят восемь
+    expect: { slots: { phone: '+79162345678' }, state: CONFIRM }
+  - user: да
+    expect: { state: DONE }
+final:
+  outcome: booked
+  booking: { service: styling, date: '2026-10-16', time: '12:00' }

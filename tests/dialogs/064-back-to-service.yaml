@@ -1,0 +1,14 @@
+id: '064-back-to-service'
+title: «Назад» возвращает к прошлому слоту
+tags: [edge, back]
+split: dev
+now: '2026-10-15T12:00:00+03:00'
+turns:
+  - user: запишите меня
+    expect: { state: ASK_SERVICE }
+  - user: на стрижку
+    expect: { slots: { service: haircut }, state: ASK_DATE }
+  - user: назад
+    expect: { state: ASK_SERVICE, slots: { service: null }, say_contains: 'стрижка' }
+final:
+  booking: none

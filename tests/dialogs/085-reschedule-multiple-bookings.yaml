@@ -1,0 +1,29 @@
+id: '085-reschedule-multiple-bookings'
+title: Перенос одной из нескольких записей
+tags: [reschedule, multiple]
+split: dev
+now: '2026-10-15T12:00:00+03:00'
+setup: |
+  INSERT INTO bookings (master_id, service_id, starts_at, ends_at, client_name, client_phone)
+  SELECT m.id, s.id, '2026-10-18 15:00+03'::timestamptz,
+         '2026-10-18 15:00+03'::timestamptz + make_interval(mins => s.duration_min),
+         'Максим', '+79160000004'
+  FROM masters m JOIN services s ON s.code = 'haircut'
+  WHERE m.name = 'Руслан';
+turns:
+  - user: перенесите запись
+    expect: { state: FIND_BOOKING }
+  - user: 8 916 000 00 04
+    expect: { state: FIND_BOOKING, say_contains: 'несколько записей' }
+  - user: '2'
+    expect: { state: ASK_DATE }
+  - user: на вторник
+    expect: { state: ASK_TIME, slots: { date: '2026-10-20' } }
+  - user: в 14:00
+    expect: { state: CONFIRM }
+  - user: да
+    expect: { state: DONE }
+final:
+  outcome: rescheduled
+  booking: none
+  existing: { phone: '+79160000004', status: confirmed, date: '2026-10-20', time: '14:00' }

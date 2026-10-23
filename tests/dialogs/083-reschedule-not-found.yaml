@@ -1,0 +1,12 @@
+id: '083-reschedule-not-found'
+title: Перенос по номеру, на который записи нет
+tags: [reschedule, not-found]
+split: dev
+now: '2026-10-15T12:00:00+03:00'
+turns:
+  - user: перенесите запись
+    expect: { state: FIND_BOOKING }
+  - user: 8 916 000 00 99
+    expect: { state: ASK_SERVICE, say_contains: 'Не нашёл запись' }
+final:
+  booking: none

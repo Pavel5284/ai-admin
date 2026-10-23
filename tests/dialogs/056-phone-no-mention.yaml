@@ -1,0 +1,15 @@
+id: '056-phone-no-mention'
+title: Телефон без слова «номер», рядом со временем
+tags: [booking, phone]
+split: dev
+now: '2026-10-15T12:00:00+03:00'
+turns:
+  - user: на бороду завтра в 15:00, 916 234-56-78
+    expect:
+      slots: { service: beard, date: '2026-10-16', time: '15:00', phone: '+79162345678' }
+      state: CONFIRM
+  - user: да
+    expect: { state: DONE }
+final:
+  outcome: booked
+  booking: { service: beard, date: '2026-10-16', time: '15:00' }

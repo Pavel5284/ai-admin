@@ -1,0 +1,11 @@
+id: '096-faq-prepaid'
+title: Нужна ли предоплата
+tags: [faq, kb-answer]
+split: dev
+now: '2026-10-15T12:00:00+03:00'
+turns:
+  - user: Нужна ли предоплата?
+    expect: { state: FAQ, say_contains: ['предоплат', 'картой'] }
+final:
+  outcome: faq_answered
+  booking: none

@@ -1,0 +1,12 @@
+id: '060-non-text-voice'
+title: Голосовое сообщение вместо текста
+tags: [edge, non-text]
+split: dev
+now: '2026-10-15T12:00:00+03:00'
+turns:
+  - user: хочу на стрижку
+    expect: { state: ASK_DATE }
+  - non_text: voice
+    expect: { state: ASK_DATE, say_contains: 'понимаю только текст' }
+final:
+  booking: none

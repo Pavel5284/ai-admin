@@ -1,0 +1,14 @@
+id: '075-date-too-far'
+title: Дата дальше горизонта записи
+tags: [edge, date]
+split: dev
+now: '2026-10-15T12:00:00+03:00'
+turns:
+  - user: запишите меня
+    expect: { state: ASK_SERVICE }
+  - user: стрижка
+    expect: { state: ASK_DATE }
+  - user: 1 января
+    expect: { state: ASK_DATE, say_contains: 'не дальше чем на 60 дней' }
+final:
+  booking: none

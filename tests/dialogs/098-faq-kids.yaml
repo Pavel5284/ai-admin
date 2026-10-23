@@ -1,0 +1,11 @@
+id: '098-faq-kids'
+title: Работает ли салон с детьми
+tags: [faq, kb-answer]
+split: dev
+now: '2026-10-15T12:00:00+03:00'
+turns:
+  - user: Вы работаете с детьми?
+    expect: { state: FAQ, say_contains: ['дет', 'Артём'] }
+final:
+  outcome: faq_answered
+  booking: none

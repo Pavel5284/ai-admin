@@ -1,0 +1,17 @@
+id: '053-phone-partial'
+title: Телефон по частям, бот считает цифры
+tags: [booking, phone]
+split: dev
+now: '2026-10-15T12:00:00+03:00'
+turns:
+  - user: хочу на стрижку завтра в 18:00
+    expect: { state: ASK_CONTACT }
+  - user: восемь девятьсот шестнадцать
+    expect: { state: ASK_CONTACT, say_contains: '4 цифры из 11' }
+  - user: два три четыре пять шесть семь восемь
+    expect: { slots: { phone: '+79162345678' }, state: CONFIRM }
+  - user: да
+    expect: { state: DONE }
+final:
+  outcome: booked
+  booking: { service: haircut, date: '2026-10-16', time: '18:00' }

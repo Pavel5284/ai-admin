@@ -1,0 +1,17 @@
+id: '026-self-correction-time'
+title: Клиент поправляет время в той же реплике
+tags: [booking, dirty, correction]
+split: dev
+now: '2026-10-15T12:00:00+03:00'
+turns:
+  - user: хочу на стрижку завтра в 18:00, точнее завтра в 19:00
+    expect:
+      slots: { service: haircut, date: '2026-10-16', time: '19:00' }
+      state: ASK_CONTACT
+  - user: 8 916 234 56 78
+    expect: { slots: { phone: '+79162345678' }, state: CONFIRM }
+  - user: да
+    expect: { state: DONE }
+final:
+  outcome: booked
+  booking: { service: haircut, date: '2026-10-16', time: '19:00' }

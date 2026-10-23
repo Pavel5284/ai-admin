@@ -1,0 +1,11 @@
+id: '092-faq-opening-hours'
+title: Вопрос о времени открытия
+tags: [faq, kb-answer]
+split: dev
+now: '2026-10-15T12:00:00+03:00'
+turns:
+  - user: Во сколько вы открываетесь?
+    expect: { state: FAQ, say_contains: '10:00' }
+final:
+  outcome: faq_answered
+  booking: none

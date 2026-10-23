@@ -1,0 +1,18 @@
+id: '076-outside-hours'
+title: Время вне рабочих часов
+tags: [edge, time]
+split: dev
+now: '2026-10-15T12:00:00+03:00'
+turns:
+  - user: запишите меня
+    expect: { state: ASK_SERVICE }
+  - user: стрижка
+    expect: { state: ASK_DATE }
+  - user: завтра
+    expect: { state: ASK_TIME }
+  - user: в 23:00
+    expect: { state: ASK_TIME, say_contains: 'с 10:00 до 21:00' }
+  - user: в 18:00
+    expect: { state: ASK_CONTACT, slots: { time: '18:00' } }
+final:
+  booking: none

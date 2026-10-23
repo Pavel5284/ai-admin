@@ -1,0 +1,15 @@
+id: '007-name-phone-one-shot'
+title: Имя и телефон вместе с записью
+tags: [booking, perfect]
+split: dev
+now: '2026-10-15T12:00:00+03:00'
+turns:
+  - user: Меня зовут Олег, хочу на стрижку послезавтра в 16:00, телефон +79167778899
+    expect:
+      slots: { service: haircut, date: '2026-10-17', time: '16:00', phone: '+79167778899', name: олег }
+      state: CONFIRM
+  - user: да
+    expect: { state: DONE }
+final:
+  outcome: booked
+  booking: { service: haircut, date: '2026-10-17', time: '16:00' }

@@ -1,0 +1,11 @@
+id: '052-faq-unanswerable'
+title: Вопрос, на который в базе нет ответа
+tags: [faq, no-answer, handoff-justified]
+split: dev
+now: '2026-10-15T12:00:00+03:00'
+turns:
+  - user: а вы делаете татуировки?
+    expect: { say_contains: 'Уточню у администратора' }
+final:
+  outcome: faq_declined
+  booking: none

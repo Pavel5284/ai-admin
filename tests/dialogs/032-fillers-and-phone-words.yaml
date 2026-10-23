@@ -1,0 +1,15 @@
+id: '032-fillers-and-phone-words'
+title: Паразиты, дата, время и телефон словами
+tags: [booking, dirty]
+split: dev
+now: '2026-10-15T12:00:00+03:00'
+turns:
+  - user: ну значит так, хочу короче на стрижку в пятницу в 17:30, телефон восемь девятьсот шестнадцать ноль один два три четыре пять шесть
+    expect:
+      slots: { service: haircut, date: '2026-10-16', time: '17:30', phone: '+79160123456' }
+      state: CONFIRM
+  - user: да
+    expect: { state: DONE }
+final:
+  outcome: booked
+  booking: { service: haircut, date: '2026-10-16', time: '17:30' }

@@ -1,0 +1,17 @@
+id: '042-weekend'
+title: «На выходных» — ближайшая суббота
+tags: [booking, ambiguous]
+split: dev
+now: '2026-10-15T12:00:00+03:00'
+turns:
+  - user: хочу на стрижку на выходных в 12:00
+    expect:
+      slots: { service: haircut, date: '2026-10-17', time: '12:00' }
+      state: ASK_CONTACT
+  - user: 8 916 234 56 78
+    expect: { slots: { phone: '+79162345678' }, state: CONFIRM }
+  - user: да
+    expect: { state: DONE }
+final:
+  outcome: booked
+  booking: { service: haircut, date: '2026-10-17', time: '12:00' }

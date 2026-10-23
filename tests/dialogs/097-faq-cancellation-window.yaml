@@ -1,0 +1,11 @@
+id: '097-faq-cancellation-window'
+title: За сколько часов можно отменить запись
+tags: [faq, kb-answer]
+split: dev
+now: '2026-10-15T12:00:00+03:00'
+turns:
+  - user: За сколько часов можно отменить запись?
+    expect: { state: FAQ, say_contains: '3 час' }
+final:
+  outcome: faq_answered
+  booking: none

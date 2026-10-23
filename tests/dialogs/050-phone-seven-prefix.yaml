@@ -1,0 +1,15 @@
+id: '050-phone-seven-prefix'
+title: Телефон с семёркой вместо восьмёрки
+tags: [booking, phone]
+split: dev
+now: '2026-10-15T12:00:00+03:00'
+turns:
+  - user: хочу на стрижку в воскресенье в 14:00
+    expect: { state: ASK_CONTACT }
+  - user: '79162345678'
+    expect: { slots: { phone: '+79162345678' }, state: CONFIRM }
+  - user: да
+    expect: { state: DONE }
+final:
+  outcome: booked
+  booking: { service: haircut, date: '2026-10-18', time: '14:00' }

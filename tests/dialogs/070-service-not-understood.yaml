@@ -1,0 +1,17 @@
+id: '070-service-not-understood'
+title: Три непонимания на вопросе об услуге
+tags: [edge, not-understood, handoff-justified]
+split: dev
+now: '2026-10-15T12:00:00+03:00'
+turns:
+  - user: запишите меня
+    expect: { state: ASK_SERVICE }
+  - user: хм
+    expect: { state: ASK_SERVICE, say_contains: 'Не совсем понял услугу' }
+  - user: что-то
+    expect: { state: ASK_SERVICE, say_contains: 'выберем из списка' }
+  - user: не знаю
+    expect: { say_contains: администратору }
+final:
+  outcome: handoff
+  booking: none

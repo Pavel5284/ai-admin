@@ -1,0 +1,5 @@
+ts,split,scenarios,task_success,false_bookings,handoff_rate,llm_share,turns_to_booking
+2026-10-23T01:29:54.440Z,dev,97,89,0,10,9,3.7
+2026-10-23T01:43:35.146Z,dev,97,97,0,9,12,3.7
+2026-10-23T01:48:29.800Z,dev,97,100,0,9,10,3.7
+2026-10-23T02:09:50.106Z,dev,97,100,0,9,10,3.7

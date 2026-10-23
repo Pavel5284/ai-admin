@@ -1,0 +1,11 @@
+id: '102-faq-no-answer-lashes'
+title: Вопрос про наращивание ресниц, которого нет в базе
+tags: [faq, no-answer, handoff-justified]
+split: dev
+now: '2026-10-15T12:00:00+03:00'
+turns:
+  - user: Сколько стоит наращивание ресниц?
+    expect: { state: HANDOFF, say_contains: 'Уточню у администратора' }
+final:
+  outcome: faq_declined
+  booking: none

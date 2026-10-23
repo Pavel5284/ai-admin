@@ -1,0 +1,20 @@
+id: '001-perfect-booking'
+title: Запись одной фразой
+tags: [booking, perfect]
+split: dev
+now: '2026-10-15T12:00:00+03:00'
+turns:
+  - user: Здравствуйте, хочу на мужскую стрижку завтра в 18:00
+    expect:
+      slots: { service: haircut, date: '2026-10-16', time: '18:00' }
+      state: ASK_CONTACT
+  - user: плюс семь девятьсот шестнадцать двести тридцать четыре пятьдесят шесть семьдесят восемь
+    expect:
+      slots: { phone: '+79162345678' }
+      state: CONFIRM
+  - user: да
+    expect:
+      state: DONE
+final:
+  outcome: booked
+  booking: { service: haircut, date: '2026-10-16', time: '18:00' }

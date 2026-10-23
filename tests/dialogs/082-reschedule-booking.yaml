@@ -1,0 +1,20 @@
+id: '082-reschedule-booking'
+title: Перенос записи на другую дату и время
+tags: [reschedule]
+split: dev
+now: '2026-10-15T12:00:00+03:00'
+turns:
+  - user: хочу перенести запись
+    expect: { state: FIND_BOOKING, say_contains: 'номер телефона' }
+  - user: 8 916 000 00 02
+    expect: { state: ASK_DATE, say_contains: 'Какой день' }
+  - user: на субботу
+    expect: { state: ASK_TIME, slots: { date: '2026-10-17' } }
+  - user: в 12:00
+    expect: { state: CONFIRM, say_contains: 'Переносим запись' }
+  - user: да
+    expect: { state: DONE, say_contains: 'перенёс' }
+final:
+  outcome: rescheduled
+  booking: none
+  existing: { phone: '+79160000002', status: confirmed, date: '2026-10-17', time: '12:00' }

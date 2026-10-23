@@ -1,0 +1,15 @@
+id: '002-one-shot-combo'
+title: 'Всё в одной фразе: имя, мастер, услуга, дата, время, телефон'
+tags: [booking, perfect]
+split: dev
+now: '2026-10-15T12:00:00+03:00'
+turns:
+  - user: Здравствуйте, меня зовут Игорь, запишите к Артёму на стрижку и бороду в субботу в 14:00, телефон +7 916 111 22 33
+    expect:
+      slots: { service: combo, masterId: 1, date: '2026-10-17', time: '14:00', phone: '+79161112233', name: игорь }
+      state: CONFIRM
+  - user: да
+    expect: { state: DONE }
+final:
+  outcome: booked
+  booking: { service: combo, date: '2026-10-17', time: '14:00' }

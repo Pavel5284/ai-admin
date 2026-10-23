@@ -1,0 +1,15 @@
+id: '006-beard-monday-phone'
+title: Борода в понедельник, телефон в той же реплике
+tags: [booking, perfect]
+split: dev
+now: '2026-10-15T12:00:00+03:00'
+turns:
+  - user: запишите меня на бороду в понедельник в 11:00, мой номер 8 916 555 44 33
+    expect:
+      slots: { service: beard, date: '2026-10-19', time: '11:00', phone: '+79165554433' }
+      state: CONFIRM
+  - user: да
+    expect: { state: DONE }
+final:
+  outcome: booked
+  booking: { service: beard, date: '2026-10-19', time: '11:00' }

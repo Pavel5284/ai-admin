@@ -1,0 +1,11 @@
+id: '091-faq-address'
+title: Вопрос об адресе
+tags: [faq, kb-answer]
+split: dev
+now: '2026-10-15T12:00:00+03:00'
+turns:
+  - user: Где вы находитесь?
+    expect: { state: FAQ, say_contains: 'Бородинская' }
+final:
+  outcome: faq_answered
+  booking: none

@@ -1,0 +1,16 @@
+id: '080-cancel-booking'
+title: Клиент отменяет существующую запись
+tags: [reschedule, cancel]
+split: dev
+now: '2026-10-15T12:00:00+03:00'
+turns:
+  - user: хочу отменить запись
+    expect: { state: FIND_BOOKING, say_contains: 'номер телефона' }
+  - user: 8 916 000 00 01
+    expect: { state: CONFIRM, say_contains: 'Отменяем запись' }
+  - user: да
+    expect: { state: DONE, say_contains: 'Запись отменена' }
+final:
+  outcome: cancelled
+  booking: none
+  existing: { phone: '+79160000001', status: cancelled, date: '2026-10-16', time: '11:00' }

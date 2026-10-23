@@ -1,0 +1,17 @@
+id: '041-silence-three-times'
+title: Клиент молчит, напоминание, повтор вопроса, завершение
+tags: [edge, silence]
+split: dev
+now: '2026-10-15T12:00:00+03:00'
+turns:
+  - user: хочу записаться на бороду
+    expect: { slots: { service: beard }, state: ASK_DATE }
+  - silence: 8000
+    expect: { say_contains: 'Вы здесь' }
+  - silence: 8000
+    expect: { say_contains: 'На какой день' }
+  - silence: 8000
+    expect: { say_contains: 'завершаю' }
+final:
+  outcome: abandoned
+  booking: none

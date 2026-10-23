@@ -1,0 +1,17 @@
+id: '034-sticky-asr'
+title: Склейка «назавтра» и опечатка в услуге
+tags: [booking, dirty]
+split: dev
+now: '2026-10-15T12:00:00+03:00'
+turns:
+  - user: мне бы постричся назавтра
+    expect: { slots: { service: haircut, date: '2026-10-16' }, state: ASK_TIME }
+  - user: в 18:30
+    expect: { slots: { time: '18:30' }, state: ASK_CONTACT }
+  - user: 8 916 234 56 78
+    expect: { slots: { phone: '+79162345678' }, state: CONFIRM }
+  - user: да
+    expect: { state: DONE }
+final:
+  outcome: booked
+  booking: { service: haircut, date: '2026-10-16', time: '18:30' }

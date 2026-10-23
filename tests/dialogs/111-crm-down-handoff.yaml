@@ -1,0 +1,14 @@
+id: '111-crm-down-handoff'
+title: CRM недоступна, задача оператору уходит в outbox
+tags: [system-failure, crm, outbox, handoff-justified]
+split: dev
+now: '2026-10-15T12:00:00+03:00'
+env:
+  CRM_URL: 'http://127.0.0.1:9'
+turns:
+  - user: позовите оператора
+    expect: { state: HANDOFF, say_contains: 'Передаю вас администратору' }
+final:
+  outcome: handoff
+  booking: none
+  outbox: task
