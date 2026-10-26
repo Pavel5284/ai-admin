@@ -66,7 +66,7 @@ async function play(lines: string[]) {
 describe('основной диалог', () => {
   it('проходит запись целиком и подтверждает словами', async () => {
     const { ctx, said } = await play([
-      'хочу записаться', 'стрижка', 'завтра', 'в 18:00', '+79161234567', 'да',
+      'хочу записаться', 'стрижка', 'завтра', 'в 18:00', '+79161234567', 'Иван', 'да',
     ]);
     expect(said).toContain('Мужская стрижка');
     expect(said).toContain('завтра');
@@ -79,7 +79,7 @@ describe('основной диалог', () => {
 
   it('названный мастер сохраняется и зачитывается в подтверждении', async () => {
     const { ctx, said } = await play([
-      'хочу записаться', 'к Артёму на стрижку завтра', 'в 18:00', '+79161234567',
+      'хочу записаться', 'к Артёму на стрижку завтра', 'в 18:00', '+79161234567', 'Иван',
     ]);
     expect(ctx.slots.masterId).toBe(1);
     expect(said).toContain('мастер Артём');
@@ -111,9 +111,9 @@ describe('основной диалог', () => {
 
   it('«нет» в подтверждении — уточняем, что менять', async () => {
     const { ctx, said } = await play([
-      'хочу записаться', 'стрижка', 'завтра', 'в 18:00', '+79161234567', 'нет', 'время',
+      'хочу записаться', 'стрижка', 'завтра', 'в 18:00', '+79161234567', 'Иван', 'нет', 'время',
     ]);
-    expect(said).toContain('Что изменить');
+    expect(said).toMatch(/Что (изменить|поправить)/);
     expect(ctx.state).toBe('ASK_TIME');
   });
 
@@ -167,6 +167,56 @@ describe('основной диалог', () => {
     expect(said).toContain('день');
     expect(ctx.state).toBe('ASK_DATE');
     expect(ctx.slots.service).toBe('haircut');
+  });
+});
+
+describe('имя клиента и выбор мастера', () => {
+  const beforePhone = ['хочу записаться', 'стрижка', 'завтра', 'в 18:00'];
+
+  it('после телефона спрашивает имя и сохраняет его', async () => {
+    const { ctx, said } = await play([...beforePhone, '+79161234567']);
+    expect(ctx.state).toBe('ASK_NAME');
+    expect(said).toContain('Как вас зовут');
+
+    await step(ctx, { type: 'user_text', text: 'Иван' }, NOW);
+    expect(ctx.slots.name).toBe('иван');
+    expect(ctx.state).toBe('CONFIRM');
+  });
+
+  it('имя можно пропустить, запись продолжится', async () => {
+    const { ctx } = await play([...beforePhone, '+79161234567', 'пропустить']);
+    expect(ctx.slots.name).toBeUndefined();
+    expect(ctx.state).toBe('CONFIRM');
+  });
+
+  it('неизвестный мастер на подтверждении: список мастеров вместо «не понял»', async () => {
+    const { ctx, said } = await play([
+      ...beforePhone, '+79161234567', 'Иван', 'хочу мастера Ивана',
+    ]);
+    expect(ctx.state).toBe('ASK_MASTER');
+    expect(said).toContain('Мастера «Ивана» нет');
+    expect(said).toContain('Артём');
+  });
+
+  it('мастера можно выбрать прямо на подтверждении', async () => {
+    const { ctx, said } = await play([
+      ...beforePhone, '+79161234567', 'Иван', 'к Артёму',
+    ]);
+    expect(ctx.state).toBe('CONFIRM');
+    expect(ctx.slots.masterId).toBe(1);
+    expect(said).toContain('мастер Артём');
+  });
+
+  it('после «мастер» показывает список и принимает выбор', async () => {
+    const { ctx, said } = await play([
+      ...beforePhone, '+79161234567', 'Иван', 'нет', 'мастер',
+    ]);
+    expect(ctx.state).toBe('ASK_MASTER');
+    expect(said).toContain('К какому мастеру записать');
+
+    await step(ctx, { type: 'user_text', text: 'к Диане' }, NOW);
+    expect(ctx.state).toBe('CONFIRM');
+    expect(ctx.slots.masterId).toBe(3);
   });
 });
 

@@ -11,6 +11,10 @@ turns:
   - user: восемь 916 два три четыре пять шесть семь восемь
     expect:
       slots: { phone: '+79162345678' }
+      state: ASK_NAME
+  - user: меня зовут Иван
+    expect:
+      slots: { name: иван }
       state: CONFIRM
   - user: все верно
     expect:

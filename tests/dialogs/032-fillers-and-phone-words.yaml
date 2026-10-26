@@ -7,6 +7,10 @@ turns:
   - user: ну значит так, хочу короче на стрижку в пятницу в 17:30, телефон восемь девятьсот шестнадцать ноль один два три четыре пять шесть
     expect:
       slots: { service: haircut, date: '2026-10-16', time: '17:30', phone: '+79160123456' }
+      state: ASK_NAME
+  - user: меня зовут Иван
+    expect:
+      slots: { name: иван }
       state: CONFIRM
   - user: да
     expect: { state: DONE }

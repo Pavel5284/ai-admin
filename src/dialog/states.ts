@@ -1,6 +1,6 @@
 export type StateId =
   | 'START' | 'INTENT' | 'ASK_SERVICE' | 'ASK_MASTER' | 'ASK_DATE' | 'ASK_TIME'
-  | 'OFFER_SLOTS' | 'ASK_CONTACT' | 'CONFIRM' | 'FIND_BOOKING' | 'FAQ' | 'HANDOFF'
+  | 'OFFER_SLOTS' | 'ASK_CONTACT' | 'ASK_NAME' | 'CONFIRM' | 'FIND_BOOKING' | 'FAQ' | 'HANDOFF'
   | 'RESUME' | 'DONE';
 
 export type Slots = {
@@ -28,6 +28,8 @@ export type Ctx = {
   pending?: 'cancel' | 'change' | 'reschedule';
   /** Состояние, вопрос которого был задан последним: нужно для глобального «назад». */
   lastAsked?: StateId;
+  /** Клиент отказался называть имя — не переспрашиваем до конца записи. */
+  nameSkipped?: boolean;
   /** Предыдущее состояние: «назад» возвращает к нему. */
   prevAsked?: StateId;
   /** Состояние, из которого клиент отвлёкся вопросом: туда мы его вернём. */

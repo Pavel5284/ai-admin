@@ -9,7 +9,11 @@ turns:
   - user: восемь девятьсот шестнадцать двести тридцать четыре пятьдесят шесть семьдесят восемь девять
     expect: { state: ASK_CONTACT, say_contains: Слишком много цифр }
   - user: 8 916 234 56 78
-    expect: { slots: { phone: '+79162345678' }, state: CONFIRM }
+    expect: { slots: { phone: '+79162345678' }, state: ASK_NAME }
+  - user: меня зовут Иван
+    expect:
+      slots: { name: иван }
+      state: CONFIRM
   - user: да
     expect: { state: DONE }
 final:

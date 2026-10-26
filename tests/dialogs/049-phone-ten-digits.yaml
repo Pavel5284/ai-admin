@@ -7,7 +7,11 @@ turns:
   - user: хочу на бороду в субботу в 12:00
     expect: { state: ASK_CONTACT }
   - user: '9162345678'
-    expect: { slots: { phone: '+79162345678' }, state: CONFIRM }
+    expect: { slots: { phone: '+79162345678' }, state: ASK_NAME }
+  - user: меня зовут Иван
+    expect:
+      slots: { name: иван }
+      state: CONFIRM
   - user: да
     expect: { state: DONE }
 final:

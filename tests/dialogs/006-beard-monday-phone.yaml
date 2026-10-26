@@ -7,6 +7,10 @@ turns:
   - user: запишите меня на бороду в понедельник в 11:00, мой номер 8 916 555 44 33
     expect:
       slots: { service: beard, date: '2026-10-19', time: '11:00', phone: '+79165554433' }
+      state: ASK_NAME
+  - user: меня зовут Иван
+    expect:
+      slots: { name: иван }
       state: CONFIRM
   - user: да
     expect: { state: DONE }

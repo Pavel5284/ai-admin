@@ -3,12 +3,12 @@ import { R } from './replies';
 import {
   checkGlobalIntents, goto, handoff, misunderstood, onBargeIn, onSilence, pick, say,
 } from './policies';
-import { formatDate, hasFaqQuestion, understand, type Nlu } from '../nlu/intent';
+import { formatDate, hasFaqQuestion, looksLikeName, understand, type Nlu } from '../nlu/intent';
 import { dateIssue, isoDate } from '../nlu/dates';
 import { outsideWorkHours } from '../nlu/time';
 import { answerKb } from '../services/kb';
 import {
-  findBookingsByPhone, findSlots, matchMaster, masterById, nearestSlots, serviceTitle,
+  allMasters, findBookingsByPhone, findSlots, matchMaster, masterById, nearestSlots, serviceTitle,
   type FreeSlot,
 } from '../services/slots';
 
@@ -56,7 +56,7 @@ export async function step(ctx: Ctx, ev: BotEvent, now: Date): Promise<StepResul
 
   // Клиент сам спрашивает, к кому идти: спрашиваем мастера отдельным состоянием.
   if (/к\s+кому|к\s+какому\s+мастеру|к\s+мастеру|кому\s+запис/.test(nlu.text)) {
-    return commit(ctx, ev, { ...goto(ctx, 'ASK_MASTER', R.askMaster), nlu }, now);
+    return commit(ctx, ev, { ...askMaster(ctx), nlu }, now);
   }
 
   // Клиент сказал неоднозначно — уточняем, слот при этом не заполняем.
@@ -132,10 +132,29 @@ async function advance(ctx: Ctx, now: Date): Promise<StepResult> {
   }
   if (!s.time) return goto(ctx, 'ASK_TIME', R.askTime);
   if (!s.phone) return goto(ctx, 'ASK_CONTACT', R.askPhone);
+  // Имя нужно для записи, но клиент может отказаться: «пропустить» запомним
+  // и больше не переспрашиваем. При переносе имя уже есть в записи.
+  if (ctx.pending !== 'reschedule' && !s.name && !ctx.nameSkipped) {
+    return goto(ctx, 'ASK_NAME', R.askName);
+  }
   return confirmAsk(ctx, now);
 }
 
-/** Подтверждение: услуга, дата словами, время, мастер, телефон. */
+const masterNames = (): string[] => allMasters().map((m) => m.name);
+
+/**
+ * Спросить мастера. Если клиент назвал неизвестное имя («Иван»), честно
+ * говорим, кого нет, и перечисляем тех, кто есть, — вместо «не понял».
+ */
+function askMaster(ctx: Ctx, text = ''): StepResult {
+  const names = masterNames();
+  const unknown = text
+    .split(/[^\p{L}-]+/u)
+    .find((w) => !/^маст/iu.test(w) && looksLikeName(w));
+  return goto(ctx, 'ASK_MASTER', unknown ? R.masterUnknown(unknown, names) : R.askMasterOptions(names));
+}
+
+/** Подтверждение: услуга, дата словами, время, мастер, телефон, имя. */
 function confirmAsk(ctx: Ctx, now: Date): StepResult {
   const s = ctx.slots;
   ctx.state = 'CONFIRM';
@@ -147,6 +166,7 @@ function confirmAsk(ctx: Ctx, now: Date): StepResult {
     s.time ?? (s.timeRange ? `${s.timeRange.from}–${s.timeRange.to}` : 'время не выбрано'),
     master ? `мастер ${master}` : 'мастер на выбор',
     s.phone ?? 'телефон не указан',
+    ...(s.name ? [`имя ${s.name}`] : []),
   ].join(', ');
   // При переносе мы не «записываем», а меняем время — формулировка другая.
   if (ctx.pending === 'reschedule') {
@@ -249,6 +269,7 @@ function askAgain(ctx: Ctx, state: StateId): StepResult {
     case 'ASK_DATE': return goto(ctx, state, R.askDate);
     case 'ASK_TIME': return goto(ctx, state, R.askTime);
     case 'ASK_CONTACT': return goto(ctx, state, R.askPhone);
+    case 'ASK_NAME': return goto(ctx, state, R.askName);
     default: return goto(ctx, 'INTENT', R.askIntent);
   }
 }
@@ -335,7 +356,21 @@ const handlers: Record<StateId, Handler> = {
 
   ASK_MASTER: async (ctx, nlu, now) => {
     absorb(ctx, nlu);              // названного мастера absorb уже записал
-    return advance(ctx, now);      // если мастер не назван — берём любого свободного
+    // «Любой», «неважно», «нет» — мастер не нужен, идём дальше.
+    if (nlu.no || /(любой|любая|любого|любому|любую|неважно|все равно|кто свободен|кто угодно|без разницы)/.test(nlu.text)) {
+      delete ctx.slots.masterId;
+      ctx.retries.ASK_MASTER = 0;
+      return advance(ctx, now);
+    }
+    if (ctx.slots.masterId) {
+      ctx.retries.ASK_MASTER = 0;
+      return advance(ctx, now);
+    }
+    // Названо имя, которого нет в списке, — показываем, кто есть.
+    if (/(мастер|специалист|барбер)/.test(nlu.text) || looksLikeName(nlu.text)) {
+      return askMaster(ctx, nlu.text);
+    }
+    return misunderstood(ctx, 'ASK_MASTER');
   },
 
   ASK_DATE: async (ctx, nlu, now) => {
@@ -414,9 +449,58 @@ const handlers: Record<StateId, Handler> = {
     return misunderstood(ctx, 'ASK_CONTACT');
   },
 
+  ASK_NAME: async (ctx, nlu, now) => {
+    absorb(ctx, nlu);
+    if (nlu.name) {
+      ctx.slots.name = nlu.name;
+      delete ctx.nameSkipped;
+      ctx.retries.ASK_NAME = 0;
+      return advance(ctx, now);
+    }
+    // Имя необязательно: «пропустить» или «нет» не должны запирать диалог.
+    if (nlu.no || /(пропустить|без имени|не важно|неважно|не надо)/.test(nlu.text)) {
+      ctx.nameSkipped = true;
+      ctx.retries.ASK_NAME = 0;
+      return advance(ctx, now);
+    }
+    if (nlu.yes) return say(ctx, R.askName);
+    const name = looksLikeName(nlu.text);
+    if (name) {
+      ctx.slots.name = name;
+      delete ctx.nameSkipped;
+      ctx.retries.ASK_NAME = 0;
+      return advance(ctx, now);
+    }
+    return misunderstood(ctx, 'ASK_NAME');
+  },
+
   CONFIRM: async (ctx, nlu, now) => {
+    const master = matchMaster(nlu.text);
+    const wantsMaster = /(маст|специалист|барбер)/.test(nlu.text);
+    const bareName = !ctx.slots.name && !nlu.yes && !nlu.no ? looksLikeName(nlu.text) : undefined;
+
     // «что изменить» — клиент называет, какой слот поправить
     if (ctx.pending === 'change') {
+      if (nlu.name) {
+        ctx.slots.name = nlu.name;
+        delete ctx.nameSkipped;
+        return confirmAsk(ctx, now);
+      }
+      // Мастер — такой же слот, как дата и время (D-021): его меняют
+      // и словом «мастер», и просто именем («нет, к Артёму»).
+      if (wantsMaster || master) {
+        if (master) {
+          ctx.slots.masterId = master.id;
+          return confirmAsk(ctx, now);
+        }
+        delete ctx.slots.masterId;
+        return askMaster(ctx, nlu.text);
+      }
+      if (/(имя|зовут)/.test(nlu.text)) {
+        delete ctx.slots.name;
+        delete ctx.nameSkipped;
+        return goto(ctx, 'ASK_NAME', R.askName);
+      }
       if (/(услуг)/.test(nlu.text)) {
         delete ctx.slots.service;
         return goto(ctx, 'ASK_SERVICE', R.askService);
@@ -434,15 +518,11 @@ const handlers: Record<StateId, Handler> = {
         delete ctx.slots.phone;
         return goto(ctx, 'ASK_CONTACT', R.askPhone);
       }
-      // Мастер — такой же слот, как дата и время (D-021): его меняют
-      // и словом «мастер», и просто именем («нет, к Артёму»).
-      if (/(мастер|специалист|барбер)/.test(nlu.text)) {
-        // Если имя назвали («хочу к Артёму»), absorb его уже проставил — перезачитываем запись.
-        if (matchMaster(nlu.text)) return confirmAsk(ctx, now);
-        delete ctx.slots.masterId;
-        return goto(ctx, 'ASK_MASTER', R.askMaster);
+      if (bareName) {
+        ctx.slots.name = bareName;
+        delete ctx.nameSkipped;
+        return confirmAsk(ctx, now);
       }
-      if (matchMaster(nlu.text)) return confirmAsk(ctx, now);
       return misunderstood(ctx, 'CONFIRM');
     }
 
@@ -487,6 +567,27 @@ const handlers: Record<StateId, Handler> = {
         return goto(ctx, 'ASK_DATE', R.askDate);   // на какую дату переносим
       }
       return misunderstood(ctx, 'CONFIRM');
+    }
+
+    // Мастера и имя можно назвать прямо в подтверждении, не переходя
+    // в «что изменить»: «хочу мастера Ивана», «меня зовут Иван».
+    if (nlu.name) {
+      ctx.slots.name = nlu.name;
+      delete ctx.nameSkipped;
+      return confirmAsk(ctx, now);
+    }
+    if (master) {
+      ctx.slots.masterId = master.id;
+      return confirmAsk(ctx, now);
+    }
+    if (wantsMaster) {
+      delete ctx.slots.masterId;
+      return askMaster(ctx, nlu.text);
+    }
+    if (bareName) {
+      ctx.slots.name = bareName;
+      delete ctx.nameSkipped;
+      return confirmAsk(ctx, now);
     }
 
     if (nlu.yes) {

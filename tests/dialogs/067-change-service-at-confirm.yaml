@@ -7,7 +7,11 @@ turns:
   - user: хочу на стрижку завтра в 15:00
     expect: { state: ASK_CONTACT }
   - user: 8 916 234 56 78
-    expect: { state: CONFIRM }
+    expect: { state: ASK_NAME }
+  - user: меня зовут Иван
+    expect:
+      slots: { name: иван }
+      state: CONFIRM
   - user: нет
     expect: { say_contains: 'услугу, дату, время' }
   - user: услугу

@@ -38,6 +38,7 @@ const ASKED_SLOT: Partial<Record<StateId, string>> = {
   ASK_DATE: 'дата',
   ASK_TIME: 'время',
   ASK_CONTACT: 'телефон',
+  ASK_NAME: 'имя',
 };
 
 /** Какие слоты можно уточнять через LLM в каждом состоянии. */
@@ -46,6 +47,7 @@ const EXPECTED_SLOT: Partial<Record<StateId, keyof Nlu>> = {
   ASK_DATE: 'date',
   ASK_TIME: 'time',
   ASK_CONTACT: 'phone',
+  ASK_NAME: 'name',
 };
 
 function buildPrompt(ctx: Ctx, now: Date): string {
@@ -73,6 +75,10 @@ function buildPrompt(ctx: Ctx, now: Date): string {
  */
 function needsLlm(nlu: Nlu, text: string, ctx: Ctx): boolean {
   if (nlu.yes || nlu.no) return false;
+  // Мастера и имя разбирают правила; модель не должна принять имя мастера
+  // за имя клиента или наоборот.
+  if (ctx.state === 'ASK_MASTER') return false;
+  if (ctx.state === 'CONFIRM' && /маст/.test(text)) return false;
   // Недобранный по частям номер — зона правил, но только там, где ждём телефон:
   // в других состояниях случайные цифры («после шести») не должны глушить модель.
   const waitingPhone = ctx.state === 'ASK_CONTACT' || ctx.state === 'FIND_BOOKING';

@@ -62,6 +62,10 @@ export function back(ctx: Ctx): StepResult {
       delete ctx.slots.phone;
       delete ctx.slots.phoneDraft;
       return goto(ctx, 'ASK_CONTACT', R.askPhone);
+    case 'ASK_NAME':
+      delete ctx.slots.name;
+      delete ctx.nameSkipped;
+      return goto(ctx, 'ASK_NAME', R.askName);
     default:
       return misunderstood(ctx, ctx.state);
   }
