@@ -1,5 +1,5 @@
 import { it, expect, describe, beforeAll, beforeEach, afterAll, vi, afterEach } from 'vitest';
-import { answerKb, searchKb, numbersOk, distMax } from '../../src/services/kb';
+import { answerKb, searchKb, numbersOk, distMax, expandQuery } from '../../src/services/kb';
 
 /**
  * Юнит-тесты защиты от выдумок (D-012): БД и модель подменены, сети нет.
@@ -93,6 +93,7 @@ describe('answerKb: ответ есть', () => {
     const result = await answerKb('где вы находитесь?');
     expect(result.answerable).toBe(true);
   });
+
 });
 
 describe('answerKb: отказы', () => {
@@ -160,6 +161,20 @@ describe('numbersOk', () => {
 
   it('ответ без чисел не требует проверки', () => {
     expect(numbersOk('Вход со двора', [CHUNKS[1]])).toBe(true);
+  });
+});
+
+describe('expandQuery', () => {
+  it('добавляет тему адреса к вопросу «где вы находитесь»', () => {
+    expect(expandQuery('Где вы находитесь?')).toContain('адрес барбершопа');
+  });
+
+  it('добавляет тему адреса к вопросу «как добраться»', () => {
+    expect(expandQuery('Как добраться до вас?')).toContain('адрес барбершопа');
+  });
+
+  it('не трогает вопрос о цене', () => {
+    expect(expandQuery('Сколько стоит стрижка?')).toBe('Сколько стоит стрижка?');
   });
 });
 

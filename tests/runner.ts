@@ -147,17 +147,23 @@ type Result = {
   outcome?: string;
   turns: number;
   llmTurns: number;
+  styleTurns: number;
 };
 
 const results: Result[] = [];
 const latencies: number[] = [];
 const latenciesLlm: number[] = [];
+const latenciesStyle: number[] = [];
 const latenciesRules: number[] = [];
 const slotStat: Record<string, { ok: number; total: number }> = {};
 let llmTurns = 0;
+let decisionTurns = 0;
+let styleTurns = 0;
+let styleAttempts = 0;
 let totalTurns = 0;
 let bookingTurns = 0;
 let bookedScenarios = 0;
+const styleFallbacksBefore = stats.styleFallbacks ?? 0;
 
 for (const s of selected) {
   const sessionId = 'eval:' + s.id;
@@ -176,23 +182,42 @@ for (const s of selected) {
   if (s.setup) await pool.query(s.setup);
 
   let scenarioLlmTurns = 0;
+  let scenarioStyleTurns = 0;
 
   for (const [i, t] of s.turns.entries()) {
     if (t.sql) await pool.query(t.sql);
     const before = stats.llmCalls;
+    const beforeStyle = stats.styleCalls ?? 0;
+    const beforeFallback = stats.styleFallbacks ?? 0;
     const t0 = Date.now();
     const sayArr = await handleEvent(sessionId, toEvent(t), now);
     const say = sayArr.join(' ');
     const latency = Date.now() - t0;
     latencies.push(latency);
     totalTurns++;
-    if (stats.llmCalls > before) {
+
+    const calls = stats.llmCalls - before;
+    const styleCalls = (stats.styleCalls ?? 0) - beforeStyle;
+    const styleFallbacks = (stats.styleFallbacks ?? 0) - beforeFallback;
+    const decisionCalls = Math.max(0, calls - styleCalls);
+    if (calls > 0) {
       llmTurns++;
       scenarioLlmTurns++;
       latenciesLlm.push(latency);
     } else {
       latenciesRules.push(latency);
     }
+    if (styleCalls > 0) {
+      styleAttempts++;
+      latenciesStyle.push(latency);
+      // В «стиль» считаем только реально применённую фразу, а не попытку:
+      // иначе отказы модели выглядят как украшенные ответы.
+      if (styleFallbacks === 0) {
+        styleTurns++;
+        scenarioStyleTurns++;
+      }
+    }
+    if (decisionCalls > 0) decisionTurns++;
 
     const e = t.expect;
     if (!e) continue;
@@ -287,7 +312,8 @@ for (const s of selected) {
 
   results.push({
     id: s.id, title: s.title, tags: s.tags ?? [], ok: failures.length === 0,
-    failures, falseBooking, outcome: ctx?.outcome, turns: s.turns.length, llmTurns: scenarioLlmTurns,
+    failures, falseBooking, outcome: ctx?.outcome, turns: s.turns.length,
+    llmTurns: scenarioLlmTurns, styleTurns: scenarioStyleTurns,
   });
   process.stdout.write(failures.length === 0 ? '.' : 'F');
 }
@@ -307,6 +333,7 @@ const faqDeclined = results.filter((r) => r.outcome === 'faq_declined').length;
 const noAnswer = results.filter((r) => r.tags.includes('no-answer'));
 const hallucinated = noAnswer.filter((r) => r.outcome === 'faq_answered').length;
 const falseCount = results.filter((r) => r.falseBooking).length;
+const styleFallbacks = (stats.styleFallbacks ?? 0) - styleFallbacksBefore;
 const tags = [...new Set(results.flatMap((r) => r.tags))].sort();
 
 const lines = [
@@ -321,9 +348,14 @@ const lines = [
   `| Handoff оправданный / лишний | ${handoffsJustified} / ${handoffsUnnecessary} |`,
   `| Hallucination rate (RAG) | ${pct(hallucinated, noAnswer.length)}% (${hallucinated}/${noAnswer.length} вопросов без ответа) |`,
   `| FAQ без ответа | ${faqDeclined} |`,
-  `| LLM share | ${pct(llmTurns, totalTurns)}% (${llmTurns}/${totalTurns} реплик) |`,
+  `| LLM share (решения) | ${pct(decisionTurns, totalTurns)}% (${decisionTurns}/${totalTurns} реплик) |`,
+  `| LLM share (стиль) | ${pct(styleTurns, totalTurns)}% (${styleTurns}/${totalTurns} реплик) |`,
+  `| LLM share (все) | ${pct(llmTurns, totalTurns)}% (${llmTurns}/${totalTurns} реплик) |`,
+  `| Style attempts | ${styleAttempts} |`,
+  `| Style fallbacks | ${styleFallbacks} |`,
   `| Latency p50 / p95 (все) | ${pctile(latencies, 0.5)} / ${pctile(latencies, 0.95)} мс |`,
   `| Latency p50 / p95 (с LLM) | ${pctile(latenciesLlm, 0.5)} / ${pctile(latenciesLlm, 0.95)} мс (${latenciesLlm.length} реплик) |`,
+  `| Latency p50 / p95 (стиль) | ${pctile(latenciesStyle, 0.5)} / ${pctile(latenciesStyle, 0.95)} мс (${latenciesStyle.length} реплик) |`,
   `| Latency p50 / p95 (правила) | ${pctile(latenciesRules, 0.5)} / ${pctile(latenciesRules, 0.95)} мс (${latenciesRules.length} реплик) |`,
   `| Turns to booking | ${bookedScenarios ? (bookingTurns / bookedScenarios).toFixed(1) : '—'} |`,
   ...Object.entries(slotStat).map(([k, v]) => `| Slot accuracy: ${k} | ${pct(v.ok, v.total)}% (${v.ok}/${v.total}) |`),
@@ -355,7 +387,7 @@ try {
 }
 await appendFile(history, [
   new Date().toISOString(), splitArg, results.length, pct(passed, results.length), falseCount,
-  pct(handoffs, results.length), pct(llmTurns, totalTurns),
+  pct(handoffs, results.length), pct(decisionTurns, totalTurns),
   bookedScenarios ? (bookingTurns / bookedScenarios).toFixed(1) : '',
 ].join(',') + '\n');
 

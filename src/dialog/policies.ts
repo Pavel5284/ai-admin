@@ -32,7 +32,7 @@ export function handoff(ctx: Ctx, reason: string, texts: string[] = R.handoff): 
   ctx.state = 'HANDOFF';
   ctx.lastAsked = 'HANDOFF';
   ctx.outcome = 'handoff';
-  return { ctx, say: pick(ctx, texts), actions: [{ type: 'handoff', reason }] };
+  return { ctx, say: pick(ctx, texts), actions: [{ type: 'handoff', reason }], humanize: false };
 }
 
 /** Не понял: 1 — переспросить с примером, 2 — сузить вопрос, 3 — оператору. */
@@ -76,8 +76,10 @@ export function checkGlobalIntents(ctx: Ctx, ev: BotEvent): StepResult | null {
   if (ev.type !== 'user_text') return null;
   const t = normalize(ev.text);
 
-  // «оператор», «человек», «администратор» → сразу оператору
-  if (/(оператор|администратор|человек|менеджер|живого|живой)/.test(t)) {
+  // «оператор», «человек», «администратор» → сразу оператору.
+  // «Ты человек?» — это вопрос о боте, его разбирает smalltalk, а не эскалация.
+  const asksIfBot = /(?:ты|вы)\s+(?:человек|бот|робот)|кто\s+(?:вы|ты)|с\s+кем\s+говорю|живой\s+человек/iu.test(t);
+  if (!asksIfBot && /(оператор|администратор|человек|менеджер|живого|живой)/.test(t)) {
     return handoff(ctx, 'client_asked_operator');
   }
 

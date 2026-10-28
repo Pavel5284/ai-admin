@@ -115,6 +115,16 @@ describe('проверка выдумок модели', () => {
     const nlu = await ask(ctx, 'записывайте меня по номеру 8 926 123 45 67 пожалуйста');
     expect(nlu.phone).toBe('+79261234567');
   });
+
+  it('модель не может выдумать smalltalk: без правила интент остаётся unknown', async () => {
+    canned = reply({ intent: 'smalltalk' });
+    const ctx = newCtx('t11', NOW);
+    ctx.state = 'ASK_DATE';
+    ctx.slots.service = 'haircut';
+    const nlu = await ask(ctx, 'ну когда-нибудь потом');
+    expect(nlu.intent).toBe('unknown');
+    expect(nlu.smalltalk).toBeUndefined();
+  });
 });
 
 describe('реплики-атаки ничего не меняют', () => {

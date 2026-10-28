@@ -3,8 +3,9 @@ import { normalize } from './normalize';
 import { parseWhen } from './dates';
 import { parseBareHour } from './time';
 import { parsePhone } from './phone';
-import { matchService } from '../services/slots';
+import { matchMaster, matchService } from '../services/slots';
 import { refineWithLlm } from './lm';
+import { detectSmalltalk, type SmalltalkKind } from './smalltalk';
 
 /**
  * Разбор реплики: интент и слоты.
@@ -12,10 +13,12 @@ import { refineWithLlm } from './lm';
  * (normalize.ts, numbers.ts, dates.ts, time.ts) — здесь только то, что нужно автомату.
  */
 
-export type NluIntent = 'booking' | 'reschedule' | 'cancel' | 'faq' | 'handoff' | 'unknown';
+export type NluIntent = 'booking' | 'reschedule' | 'cancel' | 'faq' | 'handoff' | 'smalltalk' | 'unknown';
 
 export type Nlu = {
   intent: NluIntent;
+  /** Тип светской реплики: нужен для ответа и возврата к текущему вопросу. */
+  smalltalk?: SmalltalkKind;
   service?: string;                             // код услуги
   date?: string;                                // 'YYYY-MM-DD'
   time?: string;                                // 'HH:mm'
@@ -148,12 +151,45 @@ export async function understand(ctx: Ctx, text: string, now: Date): Promise<Nlu
   }
 
   nlu.intent = detectIntent(t, text);
+
+  // Светская реплика — отдельный слой. Она не должна перехватывать дату,
+  // время, телефон, имя или мастера: «спасибо, к Артёму» — это выбор мастера.
+  const smalltalk = detectSmalltalk(t);
+  const actionable = nlu.date || nlu.time || nlu.timeRange || nlu.phone
+    || nlu.digits || nlu.name || matchMaster(t);
+  if (smalltalk) {
+    if (nlu.intent === 'unknown' && !actionable) {
+      nlu.intent = 'smalltalk';
+      nlu.smalltalk = smalltalk;
+    }
+    // «Ты человек?» правила сначала принимают за просьбу позвать человека.
+    // Это вопрос о боте, а не эскалация: smalltalk отвечает и сохраняет состояние.
+    if (smalltalk === 'bot' && nlu.intent === 'handoff'
+      && !/(оператор|администратор|менеджер|жалоб)/.test(t)) {
+      nlu.intent = 'smalltalk';
+      nlu.smalltalk = 'bot';
+    }
+  }
+
   // «стрижка» без глагола — тоже намерение записаться
   if (nlu.intent === 'unknown' && nlu.service) nlu.intent = 'booking';
 
   // Правила отработали: если реплика сложная, модель добирает недостающее
   // (день 10). Её ответ проходит проверку и не перезаписывает правила.
-  return refineWithLlm(nlu, text, ctx, now);
+  const out = await refineWithLlm(nlu, text, ctx, now);
+
+  // Модель не имеет права выдумать smalltalk: только детектор правил решает,
+  // что реплика светская. Иначе «ну когда-нибудь потом» превращалось в
+  // болтовню и сбрасывало счётчик непониманий.
+  if (out.intent === 'smalltalk') {
+    if (!smalltalk || actionable) {
+      out.intent = 'unknown';
+      delete out.smalltalk;
+    } else {
+      out.smalltalk = smalltalk;
+    }
+  }
+  return out;
 }
 
 /** «сегодня», «завтра», «во вторник, 20 октября». */

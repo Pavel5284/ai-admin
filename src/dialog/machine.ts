@@ -6,6 +6,7 @@ import {
 import { formatDate, hasFaqQuestion, looksLikeName, understand, type Nlu } from '../nlu/intent';
 import { dateIssue, isoDate } from '../nlu/dates';
 import { outsideWorkHours } from '../nlu/time';
+import { answerSmalltalk } from './smalltalk';
 import { answerKb } from '../services/kb';
 import {
   allMasters, findBookingsByPhone, findSlots, matchMaster, masterById, nearestSlots, serviceTitle,
@@ -29,12 +30,22 @@ export async function step(ctx: Ctx, ev: BotEvent, now: Date): Promise<StepResul
   if (ev.type === 'barge_in') {
     const stopped = onBargeIn(ctx, ev);        // бот замолкает, недосказанное отменяется
     const nlu = await understand(ctx, ev.text, now);
-    const res = await handlers[ctx.state](ctx, nlu, now);
-    return commit(ctx, ev, { ctx: res.ctx, say: [...stopped.say, ...res.say], actions: res.actions, nlu }, now);
+    const res = nlu.intent === 'smalltalk'
+      ? await smalltalkTurn(ctx, nlu, now)
+      : await handlers[ctx.state](ctx, nlu, now);
+    return commit(ctx, ev, {
+      ctx: res.ctx, say: [...stopped.say, ...res.say], actions: res.actions,
+      nlu, humanize: res.humanize,
+    }, now);
   }
 
   // 3. обычный текст: NLU, затем обработчик текущего состояния
   const nlu = await understand(ctx, ev.text, now);
+
+  // Светская реплика: отвечаем и возвращаемся к текущему вопросу, ничего не бронируя.
+  if (nlu.intent === 'smalltalk') {
+    return commit(ctx, ev, { ...await smalltalkTurn(ctx, nlu, now), nlu }, now);
+  }
 
   // Клиент задал вопрос посреди записи — отвечаем из базы знаний и предлагаем продолжить.
   if (nlu.intent === 'faq' && ctx.state !== 'INTENT' && ctx.state !== 'FAQ') {
@@ -138,6 +149,69 @@ async function advance(ctx: Ctx, now: Date): Promise<StepResult> {
     return goto(ctx, 'ASK_NAME', R.askName);
   }
   return confirmAsk(ctx, now);
+}
+
+/** Последний вопрос бота: его повторяем после светской реплики. */
+function lastQuestion(ctx: Ctx): string | undefined {
+  return [...ctx.history].reverse()
+    .find((h) => h.role === 'bot' && /\?\s*$/.test(h.text))?.text;
+}
+
+/**
+ * Ответ на светскую реплику и возврат к делу. Состояние не сбрасываем:
+ * если клиент отвлёкся на «спасибо» посреди записи, он остаётся в том же
+ * слоте, а бот повторяет текущий вопрос.
+ */
+async function smalltalkTurn(ctx: Ctx, nlu: Nlu, now: Date): Promise<StepResult> {
+  absorb(ctx, nlu);
+  const reply = await answerSmalltalk(nlu.smalltalk ?? 'ack', nlu.text, ctx);
+
+  const next = async (): Promise<string[]> => {
+    switch (ctx.state) {
+      case 'START':
+        if (ctx.slots.service) return (await advance(ctx, now)).say;
+        return goto(ctx, 'INTENT', R.askIntent).say;
+      case 'INTENT':
+        if (ctx.slots.service) return (await advance(ctx, now)).say;
+        return pick(ctx, R.askIntent);
+      case 'ASK_SERVICE':
+        if (ctx.slots.service) return (await advance(ctx, now)).say;
+        return pick(ctx, R.askService);
+      case 'ASK_MASTER':
+        if (ctx.slots.masterId) return (await advance(ctx, now)).say;
+        return pick(ctx, R.askMasterOptions(masterNames()));
+      case 'ASK_DATE':
+        if (ctx.slots.date) return (await advance(ctx, now)).say;
+        return pick(ctx, R.askDate);
+      case 'ASK_TIME':
+        if (ctx.slots.time || ctx.slots.timeRange) return (await advance(ctx, now)).say;
+        return pick(ctx, R.askTime);
+      case 'ASK_CONTACT':
+        if (ctx.slots.phone) return (await advance(ctx, now)).say;
+        return pick(ctx, R.askPhone);
+      case 'ASK_NAME':
+        if (ctx.slots.name || ctx.nameSkipped) return (await advance(ctx, now)).say;
+        return pick(ctx, R.askName);
+      case 'OFFER_SLOTS':
+        return [lastQuestion(ctx) ?? pick(ctx, R.askWhichSlot)[0]!];
+      case 'CONFIRM':
+        return [lastQuestion(ctx) ?? pick(ctx, R.rephrase.CONFIRM ?? R.generic)[0]!];
+      case 'FIND_BOOKING':
+        if (ctx.bookings?.length && !ctx.bookingId) {
+          return [lastQuestion(ctx) ?? pick(ctx, R.askPhone)[0]!];
+        }
+        return pick(ctx, R.askPhone);
+      case 'FAQ':
+        return pick(ctx, R.afterFaq);
+      case 'RESUME':
+        return pick(ctx, R.continueBooking);
+      case 'HANDOFF':
+      case 'DONE':
+        return [];
+    }
+  };
+
+  return { ctx, say: [reply, ...await next()], actions: [], humanize: false };
 }
 
 const masterNames = (): string[] => allMasters().map((m) => m.name);
@@ -289,12 +363,12 @@ async function faqAnswer(ctx: Ctx, question: string): Promise<StepResult> {
     if (ctx.resume) {                      // вопрос посреди записи: возвращаемся к прерванному
       ctx.state = 'RESUME';
       ctx.lastAsked = 'RESUME';
-      return { ctx, say: [kb.answer, ...pick(ctx, R.continueBooking)], actions: [] };
+      return { ctx, say: [kb.answer, ...pick(ctx, R.continueBooking)], actions: [], humanize: false };
     }
     ctx.state = 'FAQ';                     // ответили в начале диалога: слушаем дальше сами
     ctx.lastAsked = 'FAQ';
     ctx.retries.FAQ = 0;
-    return { ctx, say: [kb.answer, ...pick(ctx, R.afterFaq)], actions: [] };
+    return { ctx, say: [kb.answer, ...pick(ctx, R.afterFaq)], actions: [], humanize: false };
   }
 
   ctx.outcome = 'faq_declined';
@@ -302,11 +376,11 @@ async function faqAnswer(ctx: Ctx, question: string): Promise<StepResult> {
   if (ctx.resume) {
     ctx.state = 'RESUME';
     ctx.lastAsked = 'RESUME';
-    return { ctx, say: [...pick(ctx, R.noAnswer), ...pick(ctx, R.continueBooking)], actions };
+    return { ctx, say: [...pick(ctx, R.noAnswer), ...pick(ctx, R.continueBooking)], actions, humanize: false };
   }
   ctx.state = 'HANDOFF';
   ctx.lastAsked = 'HANDOFF';
-  return { ctx, say: pick(ctx, R.noAnswer), actions };
+  return { ctx, say: pick(ctx, R.noAnswer), actions, humanize: false };
 }
 
 const handlers: Record<StateId, Handler> = {
@@ -317,9 +391,9 @@ const handlers: Record<StateId, Handler> = {
     // Даже если смысл реплики не понят, названные дату/время/услугу не теряем:
     // «мне бы завтра после обеда» — это уже полезные слоты для следующего шага.
     absorb(ctx, nlu);
-    if (nlu.intent === 'unknown') return { ctx, say: hello, actions: [] };
+    if (nlu.intent === 'unknown') return { ctx, say: hello, actions: [], humanize: false };
     const res = await handlers.INTENT(ctx, nlu, now);
-    return { ctx: res.ctx, say: [...hello, ...res.say], actions: res.actions };
+    return { ctx: res.ctx, say: [...hello, ...res.say], actions: res.actions, humanize: false };
   },
 
   INTENT: async (ctx, nlu, now) => {

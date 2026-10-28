@@ -75,6 +75,8 @@ function buildPrompt(ctx: Ctx, now: Date): string {
  */
 function needsLlm(nlu: Nlu, text: string, ctx: Ctx): boolean {
   if (nlu.yes || nlu.no) return false;
+  // Светскую реплику уже поняли правила: модели здесь нечего извлекать.
+  if (nlu.intent === 'smalltalk') return false;
   // Мастера и имя разбирают правила; модель не должна принять имя мастера
   // за имя клиента или наоборот.
   if (ctx.state === 'ASK_MASTER') return false;
@@ -96,7 +98,7 @@ function needsLlm(nlu: Nlu, text: string, ctx: Ctx): boolean {
 
 const INTENT_MAP = {
   book: 'booking', reschedule: 'reschedule', cancel: 'cancel',
-  faq: 'faq', handoff: 'handoff', smalltalk: 'unknown', unknown: 'unknown',
+  faq: 'faq', handoff: 'handoff', smalltalk: 'smalltalk', unknown: 'unknown',
 } as const;
 
 async function extract(text: string, ctx: Ctx, now: Date): Promise<Extraction | null> {

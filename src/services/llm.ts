@@ -14,12 +14,39 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 const BASE_URL = (process.env.LLM_BASE_URL ?? 'https://api.mistral.ai/v1').replace(/\/$/, '');
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-/** Счётчик реальных вызовов модели — попадает в метрики недели 3. */
-export const stats = { llmCalls: 0 };
+/** Счётчики реальных вызовов модели — попадают в метрики недели 3. */
+export const stats = { llmCalls: 0, styleCalls: 0, styleFallbacks: 0 };
 
-async function callModel(model: string, system: string, user: string, maxTokens: number, jsonMode: boolean): Promise<Response> {
+type CompleteOpts = {
+  system: string;
+  user: string;
+  maxTokens?: number;
+  /** По умолчанию JSON-режим включён: так работает извлечение данных и RAG. */
+  jsonMode?: boolean;
+  /** Температура только для «живых» ответов; решения остаются при 0. */
+  temperature?: number;
+  /** Для reasoning-моделей: низкий уровень ускоряет короткую стилевую фразу. */
+  reasoningEffort?: string;
+  /** Стиль не должен ждать: одна попытка и сразу шаблон. */
+  fastFail?: boolean;
+  /** Свой таймаут для необязательного вызова. */
+  timeoutMs?: number;
+  /** Отдельная (обычно более быстрая) модель для стиля. */
+  model?: string;
+};
+
+async function callModel(
+  model: string,
+  system: string,
+  user: string,
+  maxTokens: number,
+  jsonMode: boolean,
+  temperature: number,
+  reasoningEffort?: string,
+  timeoutMs = Number(process.env.LLM_TIMEOUT_MS ?? 20000),
+): Promise<Response> {
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), Number(process.env.LLM_TIMEOUT_MS ?? 20000));
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
     return await fetch(BASE_URL + '/chat/completions', {
       method: 'POST',
@@ -30,8 +57,9 @@ async function callModel(model: string, system: string, user: string, maxTokens:
       },
       body: JSON.stringify({
         model,
-        temperature: 0,
+        temperature,
         max_tokens: maxTokens,
+        ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
         messages: [
           { role: 'system', content: system },
           { role: 'user', content: user },
@@ -45,15 +73,24 @@ async function callModel(model: string, system: string, user: string, maxTokens:
   }
 }
 
-async function rawComplete(opts: { system: string; user: string; maxTokens?: number }): Promise<string> {
-  const models = [process.env.LLM_MODEL, process.env.LLM_FALLBACK_MODEL].filter(Boolean) as string[];
+async function rawComplete(opts: CompleteOpts): Promise<string> {
+  const main = process.env.LLM_MODEL;
+  const fallback = process.env.LLM_FALLBACK_MODEL;
+  // Стиль — необязательный слой: при сбое сразу шаблон, без второй модели и пауз.
+  const models = (opts.model ? [opts.model] : opts.fastFail ? [main] : [main, fallback])
+    .filter(Boolean) as string[];
+  const maxAttempts = opts.fastFail ? 1 : 2;
   let lastError = 'LLM_MODEL не задан в .env';
-  let jsonMode = true;
+  let jsonMode = opts.jsonMode ?? true;
+  const temperature = opts.temperature ?? 0;
   for (const model of models) {                      // сначала основная модель, потом запасная
-    for (let attempt = 0; attempt < 2; attempt++) {
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
       let res: Response;
       try {
-        res = await callModel(model, opts.system, opts.user, opts.maxTokens ?? 400, jsonMode);
+        res = await callModel(
+          model, opts.system, opts.user, opts.maxTokens ?? 400, jsonMode,
+          temperature, opts.reasoningEffort, opts.timeoutMs,
+        );
       } catch (e) {                                  // таймаут или нет сети
         lastError = 'LLM: ' + (e as Error).message;
         continue;
@@ -89,7 +126,7 @@ async function cached(key: string, make: () => Promise<string>): Promise<string>
   return value;
 }
 
-export const complete = (opts: { system: string; user: string; maxTokens?: number }): Promise<string> => {
+export const complete = (opts: CompleteOpts): Promise<string> => {
   stats.llmCalls++;
   return cached(JSON.stringify(opts), () => rawComplete(opts));
 };

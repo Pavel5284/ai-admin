@@ -70,6 +70,11 @@ export type StepResult = {
   actions: Action[];
   /** Что удалось разобрать в реплике: пишется в dialog_log.nlu для метрик. */
   nlu?: unknown;
+  /**
+   * Можно ли добавить к готовому ответу короткую живую вводную фразу.
+   * `false` — ответ уже написан моделью или требует серьёзного тона.
+   */
+  humanize?: boolean;
 };
 
 export const newCtx = (sessionId: string, now: Date): Ctx => ({

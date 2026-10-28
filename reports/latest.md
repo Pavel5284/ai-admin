@@ -1,24 +1,29 @@
-# Отчёт eval (dev), 2026-10-26 14:27
+# Отчёт eval (dev), 2026-10-27 15:08
 
 | Метрика | Значение |
 |---|---|
-| Сценариев | 98 |
-| Task success | 100% (98/98) |
+| Сценариев | 100 |
+| Task success | 100% (100/100) |
 | False-booking | 0 |
 | Handoff rate | 9% (9) |
 | Handoff оправданный / лишний | 8 / 1 |
 | Hallucination rate (RAG) | 0% (0/3 вопросов без ответа) |
 | FAQ без ответа | 4 |
-| LLM share | 8% (31/367 реплик) |
-| Latency p50 / p95 (все) | 10 / 136 мс |
-| Latency p50 / p95 (с LLM) | 19 / 980 мс (31 реплик) |
-| Latency p50 / p95 (правила) | 10 / 35 мс (336 реплик) |
-| Turns to booking | 4.7 |
-| Slot accuracy: service | 100% (46/46) |
-| Slot accuracy: date | 100% (49/49) |
-| Slot accuracy: time | 100% (47/47) |
-| Slot accuracy: phone | 100% (46/46) |
-| Slot accuracy: name | 100% (60/60) |
+| LLM share (решения) | 8% (31/383 реплик) |
+| LLM share (стиль) | 15% (59/383 реплик) |
+| LLM share (все) | 59% (225/383 реплик) |
+| Style attempts | 209 |
+| Style fallbacks | 150 |
+| Latency p50 / p95 (все) | 44 / 3775 мс |
+| Latency p50 / p95 (с LLM) | 3449 / 3938 мс (225 реплик) |
+| Latency p50 / p95 (стиль) | 3464 / 3970 мс (209 реплик) |
+| Latency p50 / p95 (правила) | 18 / 158 мс (158 реплик) |
+| Turns to booking | 4.8 |
+| Slot accuracy: service | 100% (48/48) |
+| Slot accuracy: date | 100% (51/51) |
+| Slot accuracy: time | 100% (49/49) |
+| Slot accuracy: phone | 100% (48/48) |
+| Slot accuracy: name | 100% (62/62) |
 | Slot accuracy: masterId | 100% (6/6) |
 
 ## По категориям
@@ -29,7 +34,7 @@
 | attack | 6 | 100% |
 | back | 1 | 100% |
 | barge-in | 1 | 100% |
-| booking | 48 | 100% |
+| booking | 50 | 100% |
 | cancel | 4 | 100% |
 | correction | 7 | 100% |
 | crm | 2 | 100% |
@@ -58,6 +63,8 @@
 | silence | 1 | 100% |
 | slot-taken | 1 | 100% |
 | slots | 1 | 100% |
+| smalltalk | 2 | 100% |
+| state-preserved | 1 | 100% |
 | system-failure | 6 | 100% |
 | time | 1 | 100% |
 | two-intents | 1 | 100% |
