@@ -106,6 +106,9 @@ const nearestWeekday = (from: Date, target: number): Date => {
 /** «послезавтра», «завтра», «сегодня», «через 3 дня», «через неделю». */
 function relativeDay(text: string, today: Date): Hit | null {
   const rules: Array<[RegExp, (m: RegExpExecArray) => number]> = [
+    // «после завтра» пишут раздельно; нормализатор тоже склеивает, но правило
+    // должно работать и само по себе — иначе «завтра» внутри фразы даст +1.
+    [wb(String.raw`после\s+завтра`), () => 2],
     [wb('послезавтра'), () => 2],
     [wb('позавчера'), () => -2],
     [wb('вчера'), () => -1],

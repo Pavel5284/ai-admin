@@ -1,7 +1,7 @@
 import type { Ctx } from '../dialog/states';
 import { normalize } from './normalize';
 import { parseWhen } from './dates';
-import { parseBareHour } from './time';
+import { parseBareHour, parseBareHourInText } from './time';
 import { parsePhone } from './phone';
 import { matchMaster, matchService } from '../services/slots';
 import { refineWithLlm } from './lm';
@@ -126,9 +126,15 @@ export async function understand(ctx: Ctx, text: string, now: Date): Promise<Nlu
   if (when.ambiguous) nlu.ambiguous = when.ambiguous;
 
   // «18» в ответ на вопрос о времени — это час, а не «18-е число».
-  if (!nlu.time && !nlu.timeRange && nlu.date && ctx.lastAsked === 'ASK_TIME') {
-    const bare = parseBareHour(t);
-    if (bare) {
+  // В списке окон «13 диана» — тоже время и мастер, а не 13-е число.
+  const awaitingTime = ctx.lastAsked === 'ASK_TIME' || ctx.state === 'OFFER_SLOTS';
+  if (!nlu.time && !nlu.timeRange && nlu.date && awaitingTime) {
+    const bare = parseBareHour(t) ?? parseBareHourInText(text);
+    const raw = /(?<![\p{L}\d])(\d{1,2})(?![\p{L}\d])/u.exec(t)?.[1];
+    const rawHour = raw ? Number(raw) : 0;
+    // В OFFER_SLOTS числа 1–3 — номера вариантов, а не часы.
+    const optionNumber = ctx.state === 'OFFER_SLOTS' && rawHour >= 1 && rawHour <= 3;
+    if (bare && !optionNumber) {
       nlu.time = bare;
       delete nlu.date;
     }

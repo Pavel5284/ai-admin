@@ -1,5 +1,5 @@
 ﻿import { it, expect, describe } from 'vitest';
-import { parseBareHour, parseTimeRules } from '../src/time';
+import { parseBareHour, parseBareHourInText, parseTimeRules } from '../src/time';
 import { normalize } from '../src/normalize';
 
 const when = (text: string) => parseTimeRules(normalize(text));
@@ -45,5 +45,29 @@ describe('голое число как час', () => {
 
   it.each(['', 'да', '1 2', 'abc', '25'])('«%s» — не час', (input) => {
     expect(parseBareHour(input)).toBeUndefined();
+  });
+});
+
+describe('голое число рядом с мастером', () => {
+  it.each([
+    ['13 диана', '13:00'],
+    ['13 к диане', '13:00'],
+    ['на 13 диана', '13:00'],
+    ['18 артем', '18:00'],
+  ])('%s → %s', (input, expected) => {
+    expect(parseBareHourInText(input)).toBe(expected);
+  });
+
+  it.each([
+    '13 ноября',
+    '13.11',
+    '13 числа',
+    '13-го',
+    '13-е',
+    'в пятницу 13',
+    'через 13 дней',
+    'сегодня 13',
+  ])('«%s» — дата, а не час', (input) => {
+    expect(parseBareHourInText(input)).toBeUndefined();
   });
 });

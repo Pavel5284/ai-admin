@@ -272,6 +272,26 @@ describe('выбор окна и вопросы посреди записи', ()
     expect(said).toContain('Свободное время');
   });
 
+  it('«13 диана» в списке окон — это время и мастер, а не 13-е число', async () => {
+    const { ctx } = await play(['хочу записаться', 'стрижка', 'давай на после завтра после обеда']);
+    expect(ctx.state).toBe('OFFER_SLOTS');
+    expect(ctx.slots.date).toBe('2026-10-22');
+
+    await step(ctx, { type: 'user_text', text: '13 диана' }, NOW);
+    expect(ctx.slots.date).toBe('2026-10-22');
+    expect(ctx.slots.time).toBe('13:00');
+    expect(ctx.slots.masterId).toBe(3);
+    expect(ctx.state).toBe('ASK_CONTACT');
+  });
+
+  it('«13 диана» в ответ на вопрос о времени — тоже время и мастер', async () => {
+    const { ctx } = await play(['хочу записаться', 'стрижка', 'завтра', '13 диана']);
+    expect(ctx.slots.date).toBe('2026-10-21');
+    expect(ctx.slots.time).toBe('13:00');
+    expect(ctx.slots.masterId).toBe(3);
+    expect(ctx.state).toBe('ASK_CONTACT');
+  });
+
   it('«Можно ли прийти без записи?» — вопрос, а не запись', async () => {
     const { ctx, said } = await play(['Можно ли прийти без записи?']);
     expect(ctx.state).toBe('FAQ');
