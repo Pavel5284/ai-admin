@@ -51,7 +51,12 @@ export async function executeActions(ctx: Ctx, actions: Action[]): Promise<strin
       }
     }
     if (a.type === 'handoff') {
-      const task = { reason: a.reason, sessionId: ctx.sessionId, lastTurns: ctx.history.slice(-10) };
+      const task = {
+        reason: a.reason,
+        ...(a.contact ? { contact: a.contact } : {}),
+        sessionId: ctx.sessionId,
+        lastTurns: ctx.history.slice(-10),
+      };
       try {
         await createTask(task);
       } catch {

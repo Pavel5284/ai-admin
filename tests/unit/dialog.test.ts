@@ -173,13 +173,23 @@ describe('основной диалог', () => {
 describe('имя клиента и выбор мастера', () => {
   const beforePhone = ['хочу записаться', 'стрижка', 'завтра', 'в 18:00'];
 
+  it('неполный телефон не копит цифры, а просит повторить номер целиком', async () => {
+    const { ctx, said } = await play([...beforePhone, 'восемь девятьсот шестнадцать']);
+    expect(said).toContain('целиком');
+    expect(ctx.slots.phone).toBeUndefined();
+
+    await step(ctx, { type: 'user_text', text: '8 916 234 56 78' }, NOW);
+    expect(ctx.slots.phone).toBe('+79162345678');
+    expect(ctx.state).toBe('ASK_NAME');
+  });
+
   it('после телефона спрашивает имя и сохраняет его', async () => {
     const { ctx, said } = await play([...beforePhone, '+79161234567']);
     expect(ctx.state).toBe('ASK_NAME');
     expect(said).toContain('Как вас зовут');
 
     await step(ctx, { type: 'user_text', text: 'Иван' }, NOW);
-    expect(ctx.slots.name).toBe('иван');
+    expect(ctx.slots.name).toBe('Иван');
     expect(ctx.state).toBe('CONFIRM');
   });
 
@@ -247,7 +257,7 @@ describe('база знаний (дни 12–13)', () => {
     expect(said).toContain('Чем ещё помочь');
   });
 
-  it('ответа в базе нет — честное «уточню», задача оператору создана', async () => {
+  it('ответа в базе нет — честное «уточню» и остановка записи', async () => {
     answerKbMock.mockResolvedValueOnce({ answerable: false, answer: '', best: null });
     const { ctx, said } = await play(['сколько стоит татуировка?']);
     expect(said).toContain('Уточню у администратора');

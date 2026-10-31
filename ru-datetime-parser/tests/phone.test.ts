@@ -25,14 +25,12 @@ describe('parsePhone', () => {
     expect(parsePhone(input)).toEqual({ status: 'ok', phone });
   });
 
-  it('копит недописанный номер', () => {
+  it('возвращает неполный номер, но не копит его между репликами', () => {
     expect(parsePhone('8')).toEqual({ status: 'partial', digits: '8' });
     expect(parsePhone('8916')).toEqual({ status: 'partial', digits: '8916' });
     expect(parsePhone('восемь девятьсот')).toEqual({ status: 'partial', digits: '8900' });
-  });
-
-  it('дописывает цифры из прошлой реплики', () => {
-    expect(parsePhone('234 56 78', '8916')).toEqual({ status: 'ok', phone: '+79162345678' });
+    // Хвост прошлого номера не должен склеиваться с новым вводом.
+    expect(parsePhone('234 56 78')).toEqual({ status: 'partial', digits: '2345678' });
   });
 
   it('просит повторить слишком длинный номер', () => {

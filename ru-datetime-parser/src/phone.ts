@@ -10,8 +10,8 @@ import {afterCorrection, normalize, wb} from './normalize';
 
 export type PhoneResult =
   | { status: 'ok'; phone: string }          // '+79162345678'
-  | { status: 'partial'; digits: string }    // не хватает цифр: копим между репликами
-  | { status: 'too_long'; digits: string }   // лишние цифры: просим повторить
+  | { status: 'partial'; digits: string }    // не хватает цифр: просим повторить целиком
+  | { status: 'too_long'; digits: string }   // лишние цифры: просим повторить целиком
   | { status: 'none' };                      // цифр нет вообще
 
 /** Слова, после которых идёт сам номер. */
@@ -37,7 +37,7 @@ export const toE164 = (digits: string): string | null => {
   return null;
 };
 
-export function parsePhone(text: string, draft = ''): PhoneResult {
+export function parsePhone(text: string): PhoneResult {
   // 1. Берём хвост после слова «телефон»/«номер»: иначе в номер попадут
   //    цифры даты и времени. Если в хвосте цифр нет — берём всю реплику.
   const parts = text.split(MENTION);
@@ -59,8 +59,9 @@ export function parsePhone(text: string, draft = ''): PhoneResult {
   // 4. Оставляем только цифры.
   const digits = normalized.replace(/\D/g, '');
 
-  // 5. Дописываем то, что клиент уже продиктовал в прошлых репликах.
-  const all = (draft + digits).replace(/\D/g, '');
+  // 5. Номер всегда разбираем как самостоятельную реплику: неполный ввод
+  //    не копим между сообщениями, а просим клиента повторить номер целиком.
+  const all = digits;
 
   if (!all) return { status: 'none' };
   if (all.length >= 10) {

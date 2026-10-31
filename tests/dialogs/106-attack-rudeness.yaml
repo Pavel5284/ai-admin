@@ -5,7 +5,7 @@ split: dev
 now: '2026-10-15T12:00:00+03:00'
 turns:
   - user: Вы ужасно работаете, я недоволен, позовите человека
-    expect: { state: HANDOFF, say_contains: 'Передаю вас администратору' }
+    expect: { state: HANDOFF, say_contains: ['Передаю вас администратору', 'номер телефона'] }
 final:
   outcome: handoff
   booking: none

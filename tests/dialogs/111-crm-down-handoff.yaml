@@ -7,7 +7,9 @@ env:
   CRM_URL: 'http://127.0.0.1:9'
 turns:
   - user: позовите оператора
-    expect: { state: HANDOFF, say_contains: 'Передаю вас администратору' }
+    expect: { state: HANDOFF, say_contains: ['Передаю вас администратору', 'номер телефона'] }
+  - user: 89161234567
+    expect: { state: DONE, say_contains: 'передал администратору' }
 final:
   outcome: handoff
   booking: none

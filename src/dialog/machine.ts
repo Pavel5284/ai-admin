@@ -95,7 +95,7 @@ function absorb(ctx: Ctx, nlu: Nlu): void {
   // В ASK_CONTACT клиент диктует телефон, а цифры и слова «восемь», «два»
   // парсер дат легко принимает за день месяца. Такой ход не должен
   // перезаписывать уже выбранные услугу, дату и время.
-  const phoneTurn = (ctx.state === 'ASK_CONTACT' || ctx.state === 'FIND_BOOKING')
+  const phoneTurn = (ctx.state === 'ASK_CONTACT' || ctx.state === 'FIND_BOOKING' || ctx.state === 'HANDOFF')
     && (nlu.phone != null || nlu.digits != null || nlu.phoneStatus != null);
   // «Первый», «2», «третий» — это выбор из списка, а не дата. Парсер дат
   // иначе честно увидит в «первый» первое число следующего месяца.
@@ -206,6 +206,7 @@ async function smalltalkTurn(ctx: Ctx, nlu: Nlu, now: Date): Promise<StepResult>
       case 'RESUME':
         return pick(ctx, R.continueBooking);
       case 'HANDOFF':
+        return pick(ctx, R.askHandoffContact);
       case 'DONE':
         return [];
     }
@@ -352,8 +353,7 @@ function askAgain(ctx: Ctx, state: StateId): StepResult {
  * Ответ на вопрос клиента по базе знаний (день 12–13).
  * Есть ответ в базе — отвечаем фрагментами, защитных выдумок в ответе нет:
  * `answerKb` проверяет порог, схему и числа. Ответа нет — честное «уточню у
- * администратора» и задача оператору. Если клиент отвлёкся вопросом посреди
- * записи — предлагаем продолжить.
+ * администратора», остановка записи и просьба оставить контакт.
  */
 async function faqAnswer(ctx: Ctx, question: string): Promise<StepResult> {
   const kb = await answerKb(question).catch(() => ({ answerable: false, answer: '', best: null }));
@@ -371,16 +371,9 @@ async function faqAnswer(ctx: Ctx, question: string): Promise<StepResult> {
     return { ctx, say: [kb.answer, ...pick(ctx, R.afterFaq)], actions: [], humanize: false };
   }
 
-  ctx.outcome = 'faq_declined';
-  const actions: Action[] = [{ type: 'handoff', reason: 'faq_not_found' }];
-  if (ctx.resume) {
-    ctx.state = 'RESUME';
-    ctx.lastAsked = 'RESUME';
-    return { ctx, say: [...pick(ctx, R.noAnswer), ...pick(ctx, R.continueBooking)], actions, humanize: false };
-  }
-  ctx.state = 'HANDOFF';
-  ctx.lastAsked = 'HANDOFF';
-  return { ctx, say: pick(ctx, R.noAnswer), actions, humanize: false };
+  // Ответа нет — это уже передача администратору. Запись не продолжаем:
+  // сначала просим контакт, чтобы администратор мог связаться с клиентом.
+  return handoff(ctx, 'faq_not_found', R.noAnswer, 'faq_declined');
 }
 
 const handlers: Record<StateId, Handler> = {
@@ -506,19 +499,11 @@ const handlers: Record<StateId, Handler> = {
     absorb(ctx, nlu);
     if (nlu.phone) {
       ctx.slots.phone = nlu.phone;
-      delete ctx.slots.phoneDraft;
       ctx.retries.ASK_CONTACT = 0;
       return advance(ctx, now);
     }
-    if (nlu.phoneStatus === 'too_long') {
-      delete ctx.slots.phoneDraft;
-      return say(ctx, R.phoneTooLong);
-    }
-    if (nlu.digits) {
-      // nlu.digits уже включает накопленные цифры — просто сохраняем.
-      ctx.slots.phoneDraft = nlu.digits;
-      return say(ctx, [R.phonePartial(nlu.digits.length)]);
-    }
+    // Неполный или слишком длинный номер не копим: просим повторить целиком.
+    if (nlu.digits || nlu.phoneStatus) return say(ctx, R.phoneAgain);
     if (nlu.service || nlu.date || nlu.time) return goto(ctx, 'ASK_CONTACT', R.askPhone);
     return misunderstood(ctx, 'ASK_CONTACT');
   },
@@ -693,14 +678,8 @@ const handlers: Record<StateId, Handler> = {
     }
 
     if (!ctx.slots.phone) {
-      if (nlu.phoneStatus === 'too_long') {
-        delete ctx.slots.phoneDraft;
-        return say(ctx, R.phoneTooLong);
-      }
-      if (nlu.digits) {
-        ctx.slots.phoneDraft = nlu.digits;
-        return say(ctx, [R.phonePartial(nlu.digits.length)]);
-      }
+      // Неполный или слишком длинный номер не копим: просим повторить целиком.
+      if (nlu.digits || nlu.phoneStatus) return say(ctx, R.phoneAgain);
       return goto(ctx, 'FIND_BOOKING', R.askPhone);
     }
 
@@ -735,12 +714,33 @@ const handlers: Record<StateId, Handler> = {
     return handlers.INTENT(ctx, nlu, now);      // «запишите», «перенесите» — как обычный интент
   },
 
-  HANDOFF: (ctx) => {
-    const already = ctx.outcome === 'handoff' || ctx.outcome === 'faq_declined';
-    if (!already) ctx.outcome = 'handoff';
-    ctx.state = 'DONE';
-    const actions: Action[] = already ? [] : [{ type: 'handoff', reason: 'handoff' }];
-    return { ctx, say: [], actions };
+  HANDOFF: (ctx, nlu) => {
+    const reason = ctx.handoffReason ?? 'handoff';
+    const finish = (contact?: string): StepResult => {
+      ctx.state = 'DONE';
+      ctx.lastAsked = 'DONE';
+      if (!ctx.outcome) ctx.outcome = 'handoff';
+      return {
+        ctx,
+        say: pick(ctx, contact ? R.handoffContactSaved : R.handoffNoContact),
+        actions: [{ type: 'handoff', reason, ...(contact ? { contact } : {}) }],
+      };
+    };
+
+    if (nlu.phone) {
+      ctx.slots.phone = nlu.phone;
+      return finish(nlu.phone);
+    }
+    // «Нет», «не хочу», «пропустить» — не запираем клиента: задачу всё равно
+    // создаём, администратор ответит ему в Telegram.
+    if (nlu.no || /(пропустить|без телефона|не хочу|не надо)/.test(nlu.text)) return finish();
+    if (nlu.digits || nlu.phoneStatus) return say(ctx, R.phoneAgain);
+
+    // Несколько непонятных ответов подряд — не держим клиента в цикле.
+    const n = (ctx.retries.HANDOFF ?? 0) + 1;
+    ctx.retries.HANDOFF = n;
+    if (n >= 2) return finish();
+    return say(ctx, R.askHandoffContact);
   },
 
   RESUME: async (ctx, nlu, now) => {

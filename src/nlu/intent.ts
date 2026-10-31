@@ -24,13 +24,13 @@ export type Nlu = {
   time?: string;                                // 'HH:mm'
   timeRange?: { from: string; to: string };
   phone?: string;                               // '+79161234567'
-  digits?: string;                              // сырые цифры, если номер неполный
-  name?: string;
+  digits?: string;                              // сырые цифры, если номер неполный или длинный
+  name?: string;                                // имя клиента с большой буквы
   yes?: boolean;
   no?: boolean;
   text: string;                                 // нормализованный текст реплики
   ambiguous?: string[];                     // что нужно уточнить у клиента
-  phoneStatus?: 'ok' | 'partial' | 'too_long';  // что с номером: готов / копим / заново
+  phoneStatus?: 'ok' | 'partial' | 'too_long';  // что с номером: готов / неполный / заново
 };
 
 /**
@@ -65,6 +65,10 @@ const NAME_STOP = new Set([
   'цена', 'сколько', 'стоит', 'стрижка', 'борода', 'бритье', 'укладка',
 ]);
 
+/** Имя клиента храним и показываем с большой буквы: «иван» → «Иван». */
+const capitalizeName = (name: string): string =>
+  name ? name.charAt(0).toUpperCase() + name.slice(1) : name;
+
 /**
  * Имя в ответ на «Как вас зовут?». Принимаем одно слово кириллицей,
  * но не служебные слова, услуги и ответы «да/нет».
@@ -74,7 +78,7 @@ export function looksLikeName(text: string): string | undefined {
   if (!/^[а-яё][а-яё-]{1,19}$/u.test(t)) return undefined;
   if (NAME_STOP.has(t) || YES.has(t) || NO.has(t)) return undefined;
   if (matchService(t)) return undefined;
-  return t;
+  return capitalizeName(t);
 }
 
 const FAQ_RE = /(сколько стоит|стоимост|цен|прайс|адрес|где вы|находитесь|как работаете|когда работаете|правил|открыва|закрыва|работаете|что входит|без записи|отмен|перенос|до скольки|опозда|предоплат|сертификат|парковк|оплат|есть ли|нужна ли)/;
@@ -140,7 +144,7 @@ export async function understand(ctx: Ctx, text: string, now: Date): Promise<Nlu
     }
   }
 
-  const phone = parsePhone(text, ctx.slots.phoneDraft);
+  const phone = parsePhone(text);
   if (phone.status === 'ok') {
     nlu.phone = phone.phone;
   } else if (phone.status !== 'none') {
@@ -148,8 +152,8 @@ export async function understand(ctx: Ctx, text: string, now: Date): Promise<Nlu
     nlu.phoneStatus = phone.status;
   }
 
-  const name = t.match(/(?:меня\s+зовут|зовут|мое имя|моё имя|имя)\s+([а-я]{2,})/);
-  if (name) nlu.name = name[1];
+  const name = t.match(/(?:меня\s+зовут|зовут|мое имя|моё имя|имя)\s+([а-яё]{2,})/);
+  if (name) nlu.name = capitalizeName(name[1]!);
   // На вопрос «Как вас зовут?» часто отвечают просто именем: «Иван».
   if (!nlu.name && ctx.lastAsked === 'ASK_NAME') {
     const bare = looksLikeName(t);

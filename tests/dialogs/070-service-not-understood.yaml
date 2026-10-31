@@ -11,7 +11,7 @@ turns:
   - user: что-то
     expect: { state: ASK_SERVICE, say_contains: 'выберем из списка' }
   - user: не знаю
-    expect: { say_contains: администратору }
+    expect: { state: HANDOFF, say_contains: [администратору, 'номер телефона'] }
 final:
   outcome: handoff
   booking: none

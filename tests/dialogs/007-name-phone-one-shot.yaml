@@ -6,7 +6,7 @@ now: '2026-10-15T12:00:00+03:00'
 turns:
   - user: Меня зовут Олег, хочу на стрижку послезавтра в 16:00, телефон +79167778899
     expect:
-      slots: { service: haircut, date: '2026-10-17', time: '16:00', phone: '+79167778899', name: олег }
+      slots: { service: haircut, date: '2026-10-17', time: '16:00', phone: '+79167778899', name: Олег }
       state: CONFIRM
   - user: да
     expect: { state: DONE }

@@ -8,7 +8,7 @@ env:
   LLM_CACHE: '0'
 turns:
   - user: Сколько стоит мужская стрижка?
-    expect: { state: HANDOFF, say_contains: 'Уточню у администратора' }
+    expect: { state: HANDOFF, say_contains: ['Уточню у администратора', 'номер телефона'] }
 final:
   outcome: faq_declined
   booking: none

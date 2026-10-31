@@ -6,7 +6,7 @@ now: '2026-10-15T12:00:00+03:00'
 turns:
   - user: Здравствуйте, меня зовут Игорь, запишите к Артёму на стрижку и бороду в субботу в 14:00, телефон +7 916 111 22 33
     expect:
-      slots: { service: combo, masterId: 1, date: '2026-10-17', time: '14:00', phone: '+79161112233', name: игорь }
+      slots: { service: combo, masterId: 1, date: '2026-10-17', time: '14:00', phone: '+79161112233', name: Игорь }
       state: CONFIRM
   - user: да
     expect: { state: DONE }

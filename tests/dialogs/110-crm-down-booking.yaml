@@ -12,7 +12,7 @@ turns:
     expect: { state: ASK_NAME }
   - user: меня зовут Иван
     expect:
-      slots: { name: иван }
+      slots: { name: Иван }
       state: CONFIRM
   - user: да
     expect: { state: DONE, say_contains: 'записаны' }

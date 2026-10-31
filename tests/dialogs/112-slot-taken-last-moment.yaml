@@ -10,7 +10,7 @@ turns:
     expect: { state: ASK_NAME }
   - user: меня зовут Иван
     expect:
-      slots: { name: иван }
+      slots: { name: Иван }
       state: CONFIRM
   - sql: |
       -- Занимаем 13:00 у всех мастеров, которые делают детскую стрижку:

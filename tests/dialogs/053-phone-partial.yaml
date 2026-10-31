@@ -1,5 +1,5 @@
 id: '053-phone-partial'
-title: Телефон по частям, бот считает цифры
+title: Неполный телефон — просим повторить номер целиком
 tags: [booking, phone]
 split: dev
 now: '2026-10-15T12:00:00+03:00'
@@ -7,12 +7,12 @@ turns:
   - user: хочу на стрижку завтра в 18:00
     expect: { state: ASK_CONTACT }
   - user: восемь девятьсот шестнадцать
-    expect: { state: ASK_CONTACT, say_contains: '4 цифры из 11' }
-  - user: два три четыре пять шесть семь восемь
+    expect: { state: ASK_CONTACT, say_contains: 'целиком' }
+  - user: 8 916 234 56 78
     expect: { slots: { phone: '+79162345678' }, state: ASK_NAME }
   - user: меня зовут Иван
     expect:
-      slots: { name: иван }
+      slots: { name: Иван }
       state: CONFIRM
   - user: да
     expect: { state: DONE }

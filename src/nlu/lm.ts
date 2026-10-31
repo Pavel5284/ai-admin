@@ -38,6 +38,7 @@ const ASKED_SLOT: Partial<Record<StateId, string>> = {
   ASK_DATE: 'дата',
   ASK_TIME: 'время',
   ASK_CONTACT: 'телефон',
+  HANDOFF: 'телефон для связи с администратором',
   ASK_NAME: 'имя',
 };
 
@@ -47,6 +48,7 @@ const EXPECTED_SLOT: Partial<Record<StateId, keyof Nlu>> = {
   ASK_DATE: 'date',
   ASK_TIME: 'time',
   ASK_CONTACT: 'phone',
+  HANDOFF: 'phone',
   ASK_NAME: 'name',
 };
 
@@ -71,7 +73,7 @@ function buildPrompt(ctx: Ctx, now: Date): string {
 
 /**
  * Нужна ли модель этой реплике: она стоит денег и секунды-две задержки.
- * «Да/нет» и недобранный по частям телефон — всегда зона правил.
+ * «Да/нет» и неполный телефон — всегда зона правил.
  */
 function needsLlm(nlu: Nlu, text: string, ctx: Ctx): boolean {
   if (nlu.yes || nlu.no) return false;
@@ -81,9 +83,11 @@ function needsLlm(nlu: Nlu, text: string, ctx: Ctx): boolean {
   // за имя клиента или наоборот.
   if (ctx.state === 'ASK_MASTER') return false;
   if (ctx.state === 'CONFIRM' && /маст/.test(text)) return false;
-  // Недобранный по частям номер — зона правил, но только там, где ждём телефон:
+  // Неполный номер — зона правил, но только там, где ждём телефон:
   // в других состояниях случайные цифры («после шести») не должны глушить модель.
-  const waitingPhone = ctx.state === 'ASK_CONTACT' || ctx.state === 'FIND_BOOKING';
+  const waitingPhone = ctx.state === 'ASK_CONTACT'
+    || ctx.state === 'FIND_BOOKING'
+    || ctx.state === 'HANDOFF';
   if ((nlu.digits || nlu.phoneStatus) && waitingPhone) return false;
   const words = text.split(/\s+/).filter(Boolean).length;
   if (words < 3) return false;                                   // «хм», номер телефона и т.п. — модели нечего извлекать
@@ -146,7 +150,9 @@ function verifyMerge(nlu: Nlu, e: Extraction, text: string, now: Date): Nlu {
     }
   }
 
-  if (!out.name && e.name && /^[а-я]{2,40}$/.test(e.name)) out.name = e.name;
+  if (!out.name && e.name && /^[а-яё]{2,40}$/.test(e.name)) {
+    out.name = e.name.charAt(0).toUpperCase() + e.name.slice(1);
+  }
 
   // is_correction («клиент поправляет себя») влияет только на то, что
   // правила сильнее модели: исправленные слоты модель не перезаписывает.

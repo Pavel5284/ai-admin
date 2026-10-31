@@ -27,12 +27,32 @@ export function goto(ctx: Ctx, state: StateId, texts: string[] = []): StepResult
   return { ctx, say: pick(ctx, texts), actions: [] };
 }
 
-/** Передача администратору: сообщение клиенту + задача оператору. */
-export function handoff(ctx: Ctx, reason: string, texts: string[] = R.handoff): StepResult {
+/**
+ * Передача администратору: останавливаем запись и просим контакт.
+ * Задачу в CRM создаём только после телефона (или явного отказа его оставить),
+ * чтобы администратор сразу видел, куда звонить.
+ */
+export function handoff(
+  ctx: Ctx,
+  reason: string,
+  texts: string[] = R.handoff,
+  outcome: Ctx['outcome'] = 'handoff',
+): StepResult {
   ctx.state = 'HANDOFF';
   ctx.lastAsked = 'HANDOFF';
-  ctx.outcome = 'handoff';
-  return { ctx, say: pick(ctx, texts), actions: [{ type: 'handoff', reason }], humanize: false };
+  ctx.outcome = outcome;
+  ctx.handoffReason = reason;
+  delete ctx.resume;
+  delete ctx.pending;
+  delete ctx.bookingId;
+  delete ctx.bookings;
+  ctx.retries.HANDOFF = 0;
+  return {
+    ctx,
+    say: [...pick(ctx, texts), ...pick(ctx, R.askHandoffContact)],
+    actions: [],
+    humanize: false,
+  };
 }
 
 /** Не понял: 1 — переспросить с примером, 2 — сузить вопрос, 3 — оператору. */
@@ -60,7 +80,6 @@ export function back(ctx: Ctx): StepResult {
       return goto(ctx, 'ASK_TIME', R.askTime);
     case 'ASK_CONTACT':
       delete ctx.slots.phone;
-      delete ctx.slots.phoneDraft;
       return goto(ctx, 'ASK_CONTACT', R.askPhone);
     case 'ASK_NAME':
       delete ctx.slots.name;
@@ -101,7 +120,8 @@ export function checkGlobalIntents(ctx: Ctx, ev: BotEvent): StepResult | null {
 
   // «отмена», «стоп», «не надо» → подтверждение отмены.
   // «отмени запись» — это не прерывание, а отдельный сценарий (перенос/отмена), его ловит интент.
-  if (/(стоп|не надо|хватит|отмен)/.test(t) && !/запис/.test(t)) {
+  // В HANDOFF «не надо» — отказ оставлять телефон, а не отмена записи.
+  if (ctx.state !== 'HANDOFF' && /(стоп|не надо|хватит|отмен)/.test(t) && !/запис/.test(t)) {
     ctx.pending = 'cancel';
     ctx.state = 'CONFIRM';
     ctx.lastAsked = 'CONFIRM';

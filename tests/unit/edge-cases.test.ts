@@ -120,11 +120,29 @@ describe('нештатные ситуации', () => {
     expect(ctx.state).toBe('ASK_DATE');
   });
 
-  it('вопрос посреди записи: в базе ответа нет — оператор, потом продолжаем', async () => {
+  it('вопрос посреди записи: в базе ответа нет — оператор и просьба оставить контакт', async () => {
     answerKbMock.mockResolvedValueOnce({ answerable: false, answer: '', best: null });
     const { ctx, said } = await play(['хочу записаться', 'стрижка', 'сколько стоит татуировка?']);
     expect(said).toContain('Уточню у администратора');
-    expect(ctx.state).toBe('RESUME');
+    expect(said).toContain('номер телефона');
+    expect(ctx.state).toBe('HANDOFF');
+    expect(ctx.outcome).toBe('faq_declined');
+    expect(ctx.resume).toBeUndefined();
+  });
+
+  it('после передачи оператору запись не продолжается, а телефон попадает в задачу', async () => {
+    const ctx = newCtx('test:handoff-contact', NOW);
+    await step(ctx, { type: 'user_text', text: 'хочу записаться' }, NOW);
+    await step(ctx, { type: 'user_text', text: 'стрижка' }, NOW);
+    const handoff = await step(ctx, { type: 'user_text', text: 'позовите оператора' }, NOW);
+    expect(handoff.ctx.state).toBe('HANDOFF');
+    expect(handoff.say.join(' ')).toContain('номер телефона');
+
+    const done = await step(ctx, { type: 'user_text', text: '+79161234567' }, NOW);
+    expect(done.ctx.state).toBe('DONE');
+    expect(done.actions).toEqual([
+      { type: 'handoff', reason: 'client_asked_operator', contact: '+79161234567' },
+    ]);
   });
 
   it('второй вопрос посреди записи: цель возврата не теряется', async () => {

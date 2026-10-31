@@ -10,8 +10,7 @@ export type Slots = {
   time?: string;                              // 'HH:mm'
   timeRange?: { from: string; to: string };
   phone?: string;                             // '+79161234567'
-  phoneDraft?: string;                        // накопленные цифры, пока номер неполный
-  name?: string;
+  name?: string;                              // имя клиента с большой буквы
 };
 
 export type Turn = { role: 'user' | 'bot'; text: string; at: number };
@@ -34,6 +33,8 @@ export type Ctx = {
   prevAsked?: StateId;
   /** Состояние, из которого клиент отвлёкся вопросом: туда мы его вернём. */
   resume?: StateId;
+  /** Почему клиент передан администратору: попадает в задачу CRM. */
+  handoffReason?: string;
   /** Запись, которую клиент переносит или отменяет. */
   bookingId?: number;
   /** Найденные записи клиента — если их несколько, нужно выбрать. */
@@ -61,7 +62,7 @@ export type Action =
   | { type: 'create_booking'; slots: Slots }
   | { type: 'cancel_booking'; id: number }
   | { type: 'reschedule_booking'; id: number; date: string; time: string }
-  | { type: 'handoff'; reason: string }
+  | { type: 'handoff'; reason: string; contact?: string }
   | { type: 'end' };
 
 export type StepResult = {

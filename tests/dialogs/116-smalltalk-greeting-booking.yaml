@@ -17,7 +17,7 @@ turns:
   - user: +7 916 111 22 33
     expect: { slots: { phone: '+79161112233' }, state: ASK_NAME }
   - user: Иван
-    expect: { slots: { name: иван }, state: CONFIRM }
+    expect: { slots: { name: Иван }, state: CONFIRM }
   - user: да
     expect: { state: DONE }
 final:
