@@ -1,0 +1,71 @@
+# Production-файл для VPS на 1 ГБ: образы собираются локально и приезжают
+# через `docker save` / `docker load`. На сервере ничего не собирается.
+#
+# Запуск (из каталога с этим файлом, .env и db/):
+#   docker compose -p ai-admin -f docker-compose.vps.yml --profile bot up -d
+#
+# Файл не трогает чужие контейнеры: проект называется ai-admin, порты БД и
+# mock-CRM слушают только localhost. Перед запуском проверьте `docker ps`.
+
+name: ai-admin
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app
+      POSTGRES_DB: admin
+      TZ: Europe/Moscow
+    ports: ['127.0.0.1:5432:5432']
+    volumes:
+      - ./db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./db/seed.sql:/docker-entrypoint-initdb.d/02-seed.sql:ro
+      - ai-admin-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U app -d admin']
+      interval: 5s
+      retries: 10
+    restart: unless-stopped
+    mem_limit: 320m
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
+
+  mock-crm:
+    image: ai-admin-mock-crm:latest
+    environment:
+      CHAOS: ${CHAOS:-0}
+    ports: ['127.0.0.1:4000:4000']
+    restart: unless-stopped
+    mem_limit: 96m
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
+
+  bot:
+    image: ai-admin-bot:latest
+    profiles: ['bot']
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://app:app@db:5432/admin
+      CRM_URL: http://mock-crm:4000
+    depends_on:
+      db:
+        condition: service_healthy
+      mock-crm:
+        condition: service_started
+    restart: unless-stopped
+    mem_limit: 384m
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
+
+volumes:
+  ai-admin-db:
