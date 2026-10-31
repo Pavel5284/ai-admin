@@ -4,7 +4,40 @@ Runbook для сервера, на котором уже работают чу�
 `amnezia-awg2`). Сборка идёт **локально**, на VPS приезжают готовые образы:
 `node` + `tsx` + PostgreSQL на 1 ГБ не должны собирать проект.
 
-## 0. Границы
+Короткий порядок:
+
+1. Восстановить SSH-доступ и снять снимок `docker ps`.
+2. Добавить 2 ГБ swap и проверить `docker compose`.
+3. Собрать два образа локально и сохранить в `ai-admin-images.tar`.
+4. Передать образы, `docker-compose.vps.yml`, `.env` и `db/` на сервер.
+5. Загрузить образы, поднять проект `ai-admin`, загрузить базу знаний.
+6. Проверить логи, память, `amnezia-awg2` и сценарии в Telegram.
+
+## 0. Доступ
+
+Сначала восстановите доступ к нужному серверу: старый hostname
+`ams-1-vm-1kp8` больше не резолвится, а случайные IP не подходят. Возьмите
+актуальный IP и ключ в панели провайдера.
+
+```bash
+ssh -i <путь-к-ключу> root@<VPS_HOST>
+```
+
+Если вход по паролю, вводите пароль только в интерактивном запросе, не
+записывайте его в команду или историю.
+
+Проверить сервер:
+
+```bash
+hostname
+uname -m                 # ожидаем x86_64
+free -h                  # ожидаем ~1 ГБ RAM
+df -h /                  # нужно хотя бы 2–3 ГБ свободно
+```
+
+Если архитектура не `x86_64`, образы нужно собирать под неё.
+
+## 0.1. Границы
 
 - Не перезапускать Docker и не менять `/etc/docker/daemon.json`.
 - Не трогать `amnezia-awg2`, `fwupd`, `multipathd`, `unattended-upgrades`,
@@ -21,6 +54,25 @@ free -h
 ```
 
 `amnezia-awg2` должен оставаться `Up`.
+
+## 0.2. Снимок состояния
+
+До изменений сохраните список контейнеров, чтобы потом сравнить:
+
+```bash
+docker ps --format '{{.Names}}\t{{.Status}}' | sort > /root/docker-before.txt
+cat /root/docker-before.txt
+```
+
+После запуска:
+
+```bash
+docker ps --format '{{.Names}}\t{{.Status}}' | sort > /root/docker-after.txt
+diff -u /root/docker-before.txt /root/docker-after.txt
+```
+
+В diff должны появиться только контейнеры `ai-admin-*`. Если пропал
+`amnezia-awg2` или другой чужой сервис — остановитесь и разбирайтесь.
 
 ## 1. Подготовить сервер
 
@@ -120,11 +172,24 @@ scp -i $HOME\.ssh\<KEY> -r .\db root@<VPS_HOST>:/opt/ai-admin/
 
 ## 4. Загрузить образы и запустить
 
+Проверить, что порты `5432` и `4000` не заняты чужими сервисами:
+
+```bash
+ss -lntp | grep -E ':5432|:4000' || true
+```
+
+Если порт занят, уберите соответствующую строку `ports:` из
+`docker-compose.vps.yml`: бот ходит в БД и mock-CRM по внутренней сети
+Compose, наружу эти порты не нужны.
+
+Перед запуском остановите локальный бот (`npm run dev`), иначе Telegram
+отдаст `409 Conflict`: один токен не может слушать два процесса.
+
 ```bash
 cd /opt/ai-admin
 docker load -i ai-admin-images.tar
 docker compose -p ai-admin -f docker-compose.vps.yml --profile bot up -d
-docker compose -p ai-admin -f docker-compose.vps.yml ps
+docker compose -p ai-admin -f docker-compose.vps.yml --profile bot ps
 ```
 
 Если на сервере уже был проект `ai-admin`, сначала посмотреть его контейнеры,
@@ -140,7 +205,7 @@ docker ps -a --filter label=com.docker.compose.project=ai-admin
 
 ```bash
 cd /opt/ai-admin
-docker compose -p ai-admin -f docker-compose.vps.yml exec bot npm run kb:load
+docker compose -p ai-admin -f docker-compose.vps.yml --profile bot exec bot npm run kb:load
 ```
 
 Ожидаемо: `Файлов загружено: 4, фрагментов: 19` (число может отличаться,
@@ -149,7 +214,7 @@ docker compose -p ai-admin -f docker-compose.vps.yml exec bot npm run kb:load
 ## 6. Проверить
 
 ```bash
-docker compose -p ai-admin -f docker-compose.vps.yml ps
+docker compose -p ai-admin -f docker-compose.vps.yml --profile bot ps
 docker stats --no-stream
 free -h
 docker ps --format 'table {{.Names}}\t{{.Status}}'
@@ -158,11 +223,42 @@ docker ps --format 'table {{.Names}}\t{{.Status}}'
 Логи только нового бота:
 
 ```bash
-docker compose -p ai-admin -f docker-compose.vps.yml logs --tail=100 bot
+docker compose -p ai-admin -f docker-compose.vps.yml --profile bot logs --tail=100 bot
 ```
 
 В логах должно быть `Бот запущен`, без `TELEGRAM_BOT_TOKEN не задан`,
 `ECONNREFUSED` и ошибок миграций.
+
+Проверить, что токен вообще попал в контейнер, не печатая его:
+
+```bash
+docker compose -p ai-admin -f docker-compose.vps.yml --profile bot exec bot \
+  sh -lc 'test -n "$TELEGRAM_BOT_TOKEN" && echo token-set || echo token-missing'
+```
+
+Проверить сеть до LLM и эмбеддингов (401 — это нормально: ключ не печатаем,
+но DNS и HTTPS работают):
+
+```bash
+docker compose -p ai-admin -f docker-compose.vps.yml --profile bot exec bot \
+  node -e "fetch('https://api.groq.com/openai/v1/models').then(r=>console.log('groq',r.status)).catch(e=>console.error('groq',e.message))"
+
+docker compose -p ai-admin -f docker-compose.vps.yml --profile bot exec bot \
+  node -e "fetch('https://api.mistral.ai/v1/models').then(r=>console.log('mistral',r.status)).catch(e=>console.error('mistral',e.message))"
+```
+
+Проверить БД и базу знаний:
+
+```bash
+docker compose -p ai-admin -f docker-compose.vps.yml exec db \
+  psql -U app -d admin -c "select count(*) as kb_chunks from kb_chunks;"
+
+docker compose -p ai-admin -f docker-compose.vps.yml exec db \
+  psql -U app -d admin -c "select id, client_name, client_phone, starts_at, status from bookings order by id desc limit 5;"
+```
+
+`kb_chunks` должен быть около `19`. В `bookings` до подтверждения клиента
+не должно появляться новых строк: запись создаётся только после явного «да».
 
 ## 7. Проверка в Telegram
 
@@ -177,27 +273,59 @@ docker compose -p ai-admin -f docker-compose.vps.yml logs --tail=100 bot
    просит контакт.
 7. Имя `иван` отображается как `Иван`.
 
-## 8. Обновление
+## 8. Типовые ошибки
 
-Повторить шаги 2–4. Перед `up -d` можно посмотреть diff:
+| Симптом | Что проверить |
+|---|---|
+| `TELEGRAM_BOT_TOKEN не задан` | `.env` лежит рядом с `docker-compose.vps.yml`; проверка `token-missing` выше. |
+| `409 Conflict: terminated by other getUpdates request` | локальный `npm run dev` всё ещё слушает того же бота — остановите его. |
+| `ECONNREFUSED db:5432` | `docker compose ... ps`, затем `docker compose ... logs db`; БД ещё не здорова. |
+| `ECONNREFUSED mock-crm:4000` | `docker compose ... logs mock-crm`; образ `ai-admin-mock-crm:latest` загружен? |
+| `401` / `403` от LLM | неверный или пустой ключ в `.env`; ключ не печатать. |
+| `OOMKilled` | `free -h`; swap включён? `docker inspect --format '{{.State.OOMKilled}}' $(docker compose -p ai-admin -f docker-compose.vps.yml --profile bot ps -q bot)`. |
+| `no space left on device` | `df -h`; удалять только старые теги `ai-admin-*`, не делать общий prune. |
+| Бот молчит, логи чистые | проверьте, что локальный бот остановлен, и напишите `/start` в Telegram. |
+
+Не перезапускайте Docker целиком из-за ошибки одного контейнера: сначала
+смотрите `docker compose ... logs` и `docker compose ... ps`.
+
+## 9. Обновление
+
+Повторить шаги 2–4. На сервере сначала сохранить текущий образ как
+`previous`, чтобы был откат:
 
 ```bash
-docker compose -p ai-admin -f docker-compose.vps.yml config --quiet
+docker tag ai-admin-bot:latest ai-admin-bot:previous 2>/dev/null || true
+docker load -i ai-admin-images.tar
+docker compose -p ai-admin -f docker-compose.vps.yml --profile bot up -d bot
+```
+
+Проверить, что compose-файл валиден, можно так (секреты не печатаются):
+
+```bash
+docker compose -p ai-admin -f docker-compose.vps.yml --profile bot config --quiet
 ```
 
 `down` без `-v` останавливает только контейнеры проекта `ai-admin` и не
 удаляет том с базой. `down -v` удаляет данные — не использовать без
 отдельного решения.
 
-## 9. Откат
+## 10. Откат
 
 Если новый бот не поднимается:
 
 ```bash
-docker compose -p ai-admin -f docker-compose.vps.yml logs --tail=200 bot
-docker compose -p ai-admin -f docker-compose.vps.yml ps
+docker compose -p ai-admin -f docker-compose.vps.yml --profile bot logs --tail=200 bot
+docker compose -p ai-admin -f docker-compose.vps.yml --profile bot ps
 ```
 
-Вернуть предыдущий образ можно, пересобрав/загрузив старый тег и выполнив
-`up -d` с тем же compose-файлом. Не удалять `ai-admin-db` и не делать
-`down -v`: история записей и база знаний останутся.
+Вернуть предыдущий образ:
+
+```bash
+docker tag ai-admin-bot:previous ai-admin-bot:latest
+docker compose -p ai-admin -f docker-compose.vps.yml --profile bot up -d bot
+docker compose -p ai-admin -f docker-compose.vps.yml --profile bot logs --tail=100 bot
+```
+
+Не удалять `ai-admin-db` и не делать `down -v`: история записей и база
+знаний останутся.
