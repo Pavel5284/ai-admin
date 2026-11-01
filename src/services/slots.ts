@@ -234,11 +234,12 @@ export async function nearestSlots(
   now: Date,
   days = 7,
   limit = 3,
+  opts: SlotQuery = {},
 ): Promise<{ date: string; slots: FreeSlot[] }[]> {
   const out: { date: string; slots: FreeSlot[] }[] = [];
   for (let i = 0; i < days && out.length < limit; i++) {
     const date = addDays(fromDate, i);
-    const slots = await findSlots(serviceCode, date, now);
+    const slots = await findSlots(serviceCode, date, now, opts);
     if (slots.length) out.push({ date, slots: slots.slice(0, 3) });
   }
   return out;

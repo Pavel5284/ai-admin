@@ -13,6 +13,14 @@ export type Slots = {
   name?: string;                              // имя клиента с большой буквы
 };
 
+/** Конкретное окно из списка «ближайшее время»: дата + время + мастер. */
+export type NearestOption = {
+  date: string;                               // 'YYYY-MM-DD'
+  time: string;                               // 'HH:mm'
+  masterId: number;
+  masterName: string;
+};
+
 export type Turn = { role: 'user' | 'bot'; text: string; at: number };
 
 export type Ctx = {
@@ -39,6 +47,10 @@ export type Ctx = {
   bookingId?: number;
   /** Найденные записи клиента — если их несколько, нужно выбрать. */
   bookings?: BookingRef[];
+  /** Клиент просит ближайшее время, но услуга ещё не названа. */
+  wantsNearest?: boolean;
+  /** Показанные варианты «ближайшее время» — выбор из них в OFFER_SLOTS. */
+  nearest?: NearestOption[];
 };
 
 /** Запись, найденная по телефону: то, что нужно для переноса и отмены. */

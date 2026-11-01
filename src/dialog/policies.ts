@@ -46,6 +46,8 @@ export function handoff(
   delete ctx.pending;
   delete ctx.bookingId;
   delete ctx.bookings;
+  delete ctx.nearest;
+  delete ctx.wantsNearest;
   ctx.retries.HANDOFF = 0;
   return {
     ctx,
@@ -73,10 +75,14 @@ export function back(ctx: Ctx): StepResult {
       return goto(ctx, 'ASK_SERVICE', R.askService);
     case 'ASK_DATE':
       delete ctx.slots.date;
+      delete ctx.nearest;
+      delete ctx.wantsNearest;
       return goto(ctx, 'ASK_DATE', R.askDate);
     case 'ASK_TIME':
       delete ctx.slots.time;
       delete ctx.slots.timeRange;
+      delete ctx.nearest;
+      delete ctx.wantsNearest;
       return goto(ctx, 'ASK_TIME', R.askTime);
     case 'ASK_CONTACT':
       delete ctx.slots.phone;

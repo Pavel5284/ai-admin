@@ -77,6 +77,9 @@ function buildPrompt(ctx: Ctx, now: Date): string {
  */
 function needsLlm(nlu: Nlu, text: string, ctx: Ctx): boolean {
   if (nlu.yes || nlu.no) return false;
+  // «Ближайшее время» — это не дата: правила уже поняли запрос, модели
+  // нечего извлекать, а лишний вызов только добавляет задержку.
+  if (nlu.nearest) return false;
   // Светскую реплику уже поняли правила: модели здесь нечего извлекать.
   if (nlu.intent === 'smalltalk') return false;
   // Мастера и имя разбирают правила; модель не должна принять имя мастера

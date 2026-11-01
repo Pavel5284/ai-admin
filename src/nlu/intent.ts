@@ -28,6 +28,8 @@ export type Nlu = {
   name?: string;                                // имя клиента с большой буквы
   yes?: boolean;
   no?: boolean;
+  /** «Когда есть ближайшее?», «срочно», «любое время» — не дата, а запрос окон. */
+  nearest?: boolean;
   text: string;                                 // нормализованный текст реплики
   ambiguous?: string[];                     // что нужно уточнить у клиента
   phoneStatus?: 'ok' | 'partial' | 'too_long';  // что с номером: готов / неполный / заново
@@ -95,6 +97,12 @@ const QUESTION_RE = /(?:\?|^\s*(?:а\s+)?(?:можно|скажите|подск
  */
 const ACTION_REQUEST_RE = /(?:(?:хочу|хотел[аи]?|мне\s+(?:нужно|надо)|давайте)\s+[^,.!?]{0,25}(?:записаться|записатся|забронировать|отменить|перенести|на\s)|(?:запишите|отмените|перенесите))/iu;
 
+/**
+ * Просьба показать ближайшее свободное время. Это не дата: «когда есть?»
+ * и «мне срочно» должны вести к списку окон, а не к «Не совсем понял дату».
+ */
+const NEAREST_RE = /(ближайш\p{L}*|как\s+можно\s+(?:скорее|раньше)|самое\s+раннее|поскорее|побыстре\p{L}*|срочн\p{L}*|чем\s+раньше|пораньше|любое\s+время|когда\s+(?:есть(?:\s+(?:время|окно|окна|окошк\p{L}*|слот\p{L}*|свободн\p{L}*|место)|$)|свободн\p{L}*)|что\s+есть\s+(?:на|по|сегодня|завтра|сейчас|ближайш\p{L}*|свободн\p{L}*)|свободн\p{L}*\s+(?:время|окно|окна|окошк\p{L}*|слот\p{L}*)|есть\s+(?:время|окно|окна|окошк\p{L}*|слот\p{L}*|свободн\p{L}*))/iu;
+
 /** Клиент задал вопрос — возможно, вместе с просьбой записаться. */
 export const hasFaqQuestion = (text: string): boolean => FAQ_RE.test(text);
 
@@ -103,12 +111,17 @@ const detectIntent = (text: string, raw = ''): NluIntent => {
 
   // «За сколько часов можно отменить?» содержит слово «отменить», но это
   // вопрос о правилах, а не команда отмены. Сначала отделяем вопрос.
+  // «Есть ли свободное время?» — наоборот, запрос окон, а не FAQ.
+  // Одно «срочно» без слов о времени не должно перебивать вопрос о цене.
   const isQuestion = QUESTION_RE.test(raw) || QUESTION_RE.test(text);
-  if (FAQ_RE.test(text) && isQuestion && !ACTION_REQUEST_RE.test(text)) return 'faq';
+  const nearest = NEAREST_RE.test(text);
+  const nearestWithoutUrgency = NEAREST_RE.test(text.replace(/срочн\p{L}*/giu, ' '));
+  if (!nearestWithoutUrgency && FAQ_RE.test(text) && isQuestion && !ACTION_REQUEST_RE.test(text)) return 'faq';
 
   if (/(отмени|отмена|отмену|отмен)/.test(text)) return 'cancel';
   if (/(перенес|перенос|перенести|перенеси|другой день|другое время|передвинуть)/.test(text)) return 'reschedule';
-  if (/(запис|запиш|забронир|подстр|постр|стрич|свободн(ое|ые|ый) (время|окно|день)|место есть|хочу на)/.test(text)) return 'booking';
+  if (nearest
+    || /(запис|запиш|забронир|подстр|постр|стрич|свободн(ое|ые|ый) (время|окно|день)|место есть|хочу на)/.test(text)) return 'booking';
   if (FAQ_RE.test(text)) return 'faq';
   return 'unknown';
 };
@@ -128,6 +141,8 @@ export async function understand(ctx: Ctx, text: string, now: Date): Promise<Nlu
   if (when.time) nlu.time = when.time;
   if (when.timeRange) nlu.timeRange = when.timeRange;
   if (when.ambiguous) nlu.ambiguous = when.ambiguous;
+
+  if (NEAREST_RE.test(t)) nlu.nearest = true;
 
   // «18» в ответ на вопрос о времени — это час, а не «18-е число».
   // В списке окон «13 диана» — тоже время и мастер, а не 13-е число.
@@ -166,7 +181,7 @@ export async function understand(ctx: Ctx, text: string, now: Date): Promise<Nlu
   // время, телефон, имя или мастера: «спасибо, к Артёму» — это выбор мастера.
   const smalltalk = detectSmalltalk(t);
   const actionable = nlu.date || nlu.time || nlu.timeRange || nlu.phone
-    || nlu.digits || nlu.name || matchMaster(t);
+    || nlu.digits || nlu.name || nlu.nearest || matchMaster(t);
   if (smalltalk) {
     if (nlu.intent === 'unknown' && !actionable) {
       nlu.intent = 'smalltalk';

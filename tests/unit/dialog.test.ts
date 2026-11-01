@@ -239,6 +239,12 @@ describe('база знаний (дни 12–13)', () => {
     expect(ctx.outcome).toBe('faq_answered');
   });
 
+  it('«сколько стоит стрижка, срочно?» — вопрос о цене, а не поиск окон', async () => {
+    const { ctx, said } = await play(['сколько стоит стрижка, срочно?']);
+    expect(said).toContain('2000 ₽');
+    expect(ctx.state).toBe('FAQ');
+  });
+
   it('после ответа «запишите» — начинается обычная запись', async () => {
     const { ctx, said } = await play(['сколько стоит стрижка?', 'запишите меня']);
     expect(ctx.state).toBe('ASK_SERVICE');
@@ -280,6 +286,53 @@ describe('выбор окна и вопросы посреди записи', ()
     expect(ctx.slots.timeRange).toEqual({ from: '13:00', to: '17:00' });
     expect(ctx.state).toBe('OFFER_SLOTS');
     expect(said).toContain('Свободное время');
+  });
+
+  it('«когда есть время ближайшее? мне срочно» — предлагает ближайшие окна', async () => {
+    nearestSlotsMock.mockResolvedValueOnce([
+      {
+        date: '2026-10-20',
+        slots: [
+          { time: '12:30', masterId: 1, masterName: 'Артём' },
+          { time: '13:00', masterId: 2, masterName: 'Руслан' },
+          { time: '13:30', masterId: 3, masterName: 'Диана' },
+        ],
+      },
+    ]);
+    const { ctx, said } = await play([
+      'здравствуйте',
+      'лобок побрить надо',
+      'а когда есть время ближайшее? мне срочно',
+    ]);
+    expect(ctx.state).toBe('OFFER_SLOTS');
+    expect(ctx.nearest).toHaveLength(3);
+    expect(said).toContain('Ближайшее свободное время');
+    expect(said).not.toContain('Не совсем понял дату');
+
+    await step(ctx, { type: 'user_text', text: '1' }, NOW);
+    expect(ctx.slots.date).toBe('2026-10-20');
+    expect(ctx.slots.time).toBe('12:30');
+    expect(ctx.slots.masterId).toBe(1);
+    expect(ctx.state).toBe('ASK_CONTACT');
+    expect(ctx.nearest).toBeUndefined();
+  });
+
+  it('«когда есть ближайшее?» без услуги — сначала спрашивает услугу', async () => {
+    nearestSlotsMock.mockResolvedValueOnce([
+      {
+        date: '2026-10-20',
+        slots: [{ time: '12:30', masterId: 1, masterName: 'Артём' }],
+      },
+    ]);
+    const { ctx, said } = await play(['здравствуйте', 'а когда есть время ближайшее? мне срочно']);
+    expect(ctx.state).toBe('ASK_SERVICE');
+    expect(ctx.wantsNearest).toBe(true);
+    expect(said).toContain('На какую услугу');
+
+    await step(ctx, { type: 'user_text', text: 'стрижка' }, NOW);
+    expect(ctx.state).toBe('OFFER_SLOTS');
+    expect(ctx.nearest).toHaveLength(1);
+    expect(ctx.wantsNearest).toBeUndefined();
   });
 
   it('«13 диана» в списке окон — это время и мастер, а не 13-е число', async () => {

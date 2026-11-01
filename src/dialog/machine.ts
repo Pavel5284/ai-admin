@@ -1,4 +1,6 @@
-import type { Action, BotEvent, BookingRef, Ctx, StateId, StepResult } from './states';
+import type {
+  Action, BotEvent, BookingRef, Ctx, NearestOption, StateId, StepResult,
+} from './states';
 import { R } from './replies';
 import {
   checkGlobalIntents, goto, handoff, misunderstood, onBargeIn, onSilence, pick, say,
@@ -253,10 +255,57 @@ function confirmAsk(ctx: Ctx, now: Date): StepResult {
 
 /** Показать свободные окна и войти в OFFER_SLOTS. Показываем не больше трёх. */
 function offerSlots(ctx: Ctx, free: FreeSlot[], now: Date, prefix?: string): StepResult {
+  delete ctx.nearest;
   const list = free.slice(0, 3).map((s, i) => `${i + 1}) ${s.time}${s.masterName ? ' — ' + s.masterName : ''}`).join(', ');
   const when = ctx.slots.date ? formatDate(ctx.slots.date, now) : 'в этот день';
   const head = prefix ? prefix + ' ' : '';
   return goto(ctx, 'OFFER_SLOTS', [`${head}Свободное время ${when}: ${list}. Какое выбираете?`]);
+}
+
+/**
+ * Показать ближайшие окна без выбранной даты. В отличие от `offerSlots`,
+ * список может содержать разные дни, поэтому в каждом варианте есть дата.
+ */
+async function offerNearest(ctx: Ctx, now: Date): Promise<StepResult> {
+  if (!ctx.slots.service) {
+    ctx.wantsNearest = true;
+    return goto(ctx, 'ASK_SERVICE', R.askService);
+  }
+  const from = ctx.slots.date ?? isoDate(now);
+  const near = await nearestSlots(ctx.slots.service, from, now, 7, 3, {
+    masterId: ctx.slots.masterId,
+    range: ctx.slots.timeRange,
+  });
+  const options: NearestOption[] = near
+    .flatMap((d) => d.slots.map((s) => ({ date: d.date, ...s })))
+    .slice(0, 3);
+  if (!options.length) {
+    delete ctx.nearest;
+    delete ctx.wantsNearest;
+    return goto(ctx, 'ASK_DATE', R.noNearest);
+  }
+  ctx.nearest = options;
+  delete ctx.wantsNearest;
+  const list = options
+    .map((o, i) => `${i + 1}) ${formatDate(o.date, now)}, ${o.time}${o.masterName ? ' — ' + o.masterName : ''}`)
+    .join('; ');
+  return goto(ctx, 'OFFER_SLOTS', R.nearest(list));
+}
+
+/** Выбор варианта из списка ближайших окон: номер, время или «любой». */
+function pickNearest(nlu: Nlu, options: NearestOption[]): NearestOption | undefined {
+  const index: Record<string, number> = {
+    '1': 0, '2': 1, '3': 2, 'один': 0, 'два': 1, 'три': 2,
+    'первый': 0, 'второй': 1, 'третий': 2,
+    'первая': 0, 'вторая': 1, 'третья': 2,
+  };
+  if (nlu.text in index) return options[index[nlu.text]];
+  if (nlu.date && nlu.time) {
+    return options.find((o) => o.date === nlu.date && o.time === nlu.time);
+  }
+  if (nlu.time) return options.find((o) => o.time === nlu.time);
+  if (/(?:люб\p{L}*|все равно|первый вариант)/u.test(nlu.text)) return options[0];
+  return undefined;
 }
 
 /** Выбор одного из предложенных окон. */
@@ -300,6 +349,8 @@ function afterBookingFound(ctx: Ctx, booking: BookingRef): StepResult {
     delete ctx.slots.date;
     delete ctx.slots.time;
     delete ctx.slots.timeRange;
+    delete ctx.nearest;
+    delete ctx.wantsNearest;
     return goto(ctx, 'ASK_DATE', R.askDate);
   }
   // Отмена: показываем, что именно отменяем, и просим подтвердить.
@@ -315,6 +366,8 @@ function clearBookingSlots(ctx: Ctx): void {
   delete ctx.slots.date;
   delete ctx.slots.time;
   delete ctx.slots.timeRange;
+  delete ctx.nearest;
+  delete ctx.wantsNearest;
 }
 
 /**
@@ -322,6 +375,7 @@ function clearBookingSlots(ctx: Ctx): void {
  * и просим назвать другой день (строка «Нет свободных слотов» в таблице нештатных ситуаций).
  */
 async function offerOtherDays(ctx: Ctx, now: Date): Promise<StepResult> {
+  delete ctx.nearest;
   const from = ctx.slots.date ?? isoDate(now);
   const near = await nearestSlots(ctx.slots.service, from, now);
   if (!near.length) return goto(ctx, 'ASK_DATE', R.noSlots);
@@ -345,6 +399,16 @@ function askAgain(ctx: Ctx, state: StateId): StepResult {
     case 'ASK_TIME': return goto(ctx, state, R.askTime);
     case 'ASK_CONTACT': return goto(ctx, state, R.askPhone);
     case 'ASK_NAME': return goto(ctx, state, R.askName);
+    case 'OFFER_SLOTS': {
+      // После ответа на вопрос возвращаемся к тому же списку окон,
+      // в том числе к списку ближайших окон из разных дней.
+      const offered = [...ctx.history].reverse()
+        .find((h) => h.role === 'bot' && /(?:Ближайшее свободное время|Свободное время)/.test(h.text))?.text;
+      ctx.state = 'OFFER_SLOTS';
+      ctx.lastAsked = 'OFFER_SLOTS';
+      ctx.retries.OFFER_SLOTS = 0;
+      return { ctx, say: [offered ?? lastQuestion(ctx) ?? pick(ctx, R.askWhichSlot)[0]!], actions: [] };
+    }
     default: return goto(ctx, 'INTENT', R.askIntent);
   }
 }
@@ -400,6 +464,13 @@ const handlers: Record<StateId, Handler> = {
       ctx.pending = 'cancel';
       return goto(ctx, 'FIND_BOOKING', R.askPhone);
     }
+    // «Когда есть ближайшее?» — не дата, а просьба показать окна.
+    // Если услуга ещё не названа, сначала спросим её и запомним запрос.
+    if (nlu.nearest && !nlu.time) {
+      if (ctx.slots.service) return offerNearest(ctx, now);
+      ctx.wantsNearest = true;
+      return goto(ctx, 'ASK_SERVICE', R.askService);
+    }
     // Две просьбы в одной реплике: сначала вопрос, потом запись.
     if (nlu.intent === 'booking' && hasFaqQuestion(nlu.text)) {
       ctx.resume = 'INTENT';
@@ -415,7 +486,12 @@ const handlers: Record<StateId, Handler> = {
     if (nlu.service) {
       ctx.slots.service = nlu.service;
       ctx.retries.ASK_SERVICE = 0;
+      if (nlu.nearest || ctx.wantsNearest) return offerNearest(ctx, now);
       return advance(ctx, now);
+    }
+    if (nlu.nearest) {
+      ctx.wantsNearest = true;
+      return goto(ctx, 'ASK_SERVICE', R.askService);
     }
     if (nlu.date || nlu.time || nlu.phone) return goto(ctx, 'ASK_SERVICE', R.askService);
     return misunderstood(ctx, 'ASK_SERVICE');
@@ -427,11 +503,19 @@ const handlers: Record<StateId, Handler> = {
     if (nlu.no || /(любой|любая|любого|любому|любую|неважно|все равно|кто свободен|кто угодно|без разницы)/.test(nlu.text)) {
       delete ctx.slots.masterId;
       ctx.retries.ASK_MASTER = 0;
+      if (nlu.nearest || ctx.wantsNearest) return offerNearest(ctx, now);
       return advance(ctx, now);
     }
     if (ctx.slots.masterId) {
       ctx.retries.ASK_MASTER = 0;
+      if (nlu.nearest || ctx.wantsNearest) return offerNearest(ctx, now);
       return advance(ctx, now);
+    }
+    // «Когда есть?» вместо имени мастера — значит, мастер любой.
+    if (nlu.nearest || ctx.wantsNearest) {
+      delete ctx.slots.masterId;
+      ctx.retries.ASK_MASTER = 0;
+      return offerNearest(ctx, now);
     }
     // Названо имя, которого нет в списке, — показываем, кто есть.
     if (/(мастер|специалист|барбер)/.test(nlu.text) || looksLikeName(nlu.text)) {
@@ -442,6 +526,11 @@ const handlers: Record<StateId, Handler> = {
 
   ASK_DATE: async (ctx, nlu, now) => {
     absorb(ctx, nlu);
+    // «Когда есть ближайшее?» — показываем окна, а не переспрашиваем дату.
+    if (nlu.nearest && !nlu.time) {
+      ctx.retries.ASK_DATE = 0;
+      return offerNearest(ctx, now);
+    }
     if (nlu.date) {
       ctx.slots.date = nlu.date;
       ctx.retries.ASK_DATE = 0;
@@ -453,6 +542,10 @@ const handlers: Record<StateId, Handler> = {
 
   ASK_TIME: async (ctx, nlu, now) => {
     absorb(ctx, nlu);
+    if (nlu.nearest && !nlu.time) {
+      ctx.retries.ASK_TIME = 0;
+      return offerNearest(ctx, now);
+    }
     if (!nlu.time && !nlu.timeRange) {
       if (nlu.service || nlu.date || nlu.phone) return goto(ctx, 'ASK_TIME', R.askTime);
       return misunderstood(ctx, 'ASK_TIME');
@@ -480,6 +573,28 @@ const handlers: Record<StateId, Handler> = {
 
   OFFER_SLOTS: async (ctx, nlu, now) => {
     absorb(ctx, nlu);
+    // Список «ближайшее время» может содержать разные дни, поэтому сначала
+    // выбираем конкретную пару дата+время, а уже потом идём в обычный advance.
+    if (ctx.nearest?.length) {
+      const chosen = pickNearest(nlu, ctx.nearest);
+      if (chosen) {
+        ctx.slots.date = chosen.date;
+        ctx.slots.time = chosen.time;
+        delete ctx.slots.timeRange;
+        if (chosen.masterId && !ctx.slots.masterId) ctx.slots.masterId = chosen.masterId;
+        delete ctx.nearest;
+        ctx.retries.OFFER_SLOTS = 0;
+        return advance(ctx, now);
+      }
+      if (nlu.nearest) return offerNearest(ctx, now);
+      if (nlu.no) {
+        delete ctx.nearest;
+        return goto(ctx, 'ASK_DATE', R.askDate);
+      }
+      // Клиент назвал день или время — переходим к обычному выбору в этот день.
+      if (nlu.date || nlu.time || nlu.timeRange) delete ctx.nearest;
+      else return say(ctx, R.askWhichSlot);
+    }
     const free = await findSlots(ctx.slots.service, ctx.slots.date, now, {
       range: ctx.slots.timeRange, masterId: ctx.slots.masterId,
     });
