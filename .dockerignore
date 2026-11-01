@@ -13,5 +13,7 @@ db
 gide.md
 tmp-*
 *.log
+*.tar
+*.tar.gz
 ru-datetime-parser/tests
 ru-datetime-parser/examples
