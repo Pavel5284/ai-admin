@@ -64,6 +64,47 @@ function cleanPrefix(raw: string): string | null {
   return s;
 }
 
+/**
+ * Модель иногда начинает повторять готовый ответ и обрывается на полуслове:
+ * «Понял, помогу Не совсем понял дату. Скажите, например: «завтра» или».
+ * Полный повтор ловится ниже, а этот обрезанный хвост нужно снять, иначе
+ * вводная фраза превращается в дубль вопроса.
+ */
+function normalizeEcho(s: string): string {
+  return s.toLowerCase().replace(/ё/g, 'е').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+}
+
+function extractPrefix(raw: string, core: string): string | null {
+  const lowerCore = core.toLowerCase();
+  const lowerRaw = raw.toLowerCase();
+
+  // Полный повтор готового ответа — оставляем текст до и после него.
+  if (lowerRaw.includes(lowerCore)) {
+    const at = lowerRaw.indexOf(lowerCore);
+    return (raw.slice(0, at) + raw.slice(at + core.length)).trim();
+  }
+
+  // Обрезанный повтор: ищем самый длинный хвост raw, который совпадает
+  // с началом core. Минимум два слова и восемь символов — чтобы не принять
+  // за повтор короткое «понял» или «хорошо».
+  const rawWords = raw.trim().split(/\s+/);
+  const coreWords = normalizeEcho(core).split(/\s+/).filter(Boolean);
+  const max = Math.min(rawWords.length, coreWords.length);
+  for (let k = max; k >= 2; k--) {
+    const tail = normalizeEcho(rawWords.slice(-k).join(' '));
+    if (tail.length < 8) continue;
+    if (tail === coreWords.slice(0, k).join(' ')) {
+      return rawWords.slice(0, rawWords.length - k).join(' ');
+    }
+  }
+
+  // Тот же обрезанный повтор, но не в конце, а в середине — стиль отбрасываем.
+  const head = coreWords.slice(0, 3).join(' ');
+  if (head && normalizeEcho(raw).includes(head)) return null;
+
+  return raw;
+}
+
 function prompt(userText: string, core: string, ctx: Ctx): string {
   return [
     `Клиент: ${userText}`,
@@ -107,22 +148,15 @@ export async function humanize(opts: HumanizeOpts): Promise<string[]> {
         ? { timeoutMs: Number(process.env.LLM_STYLE_TIMEOUT_MS) }
         : {}),
     });
-    // Модель иногда повторяет готовый ответ внутри «вводной» фразы. Сначала
-    // вырезаем повтор, чтобы знак вопроса из ответа не браковал всю фразу,
-    // затем проверяем оставшуюся вводную часть обычными правилами.
-    const lowerCore = core.toLowerCase();
-    const lowerRaw = raw.toLowerCase();
-    let prefix: string | null;
-    if (lowerRaw.includes(lowerCore)) {
-      const at = lowerRaw.indexOf(lowerCore);
-      const before = (raw.slice(0, at) + raw.slice(at + core.length)).trim();
-      prefix = cleanPrefix(before);
-      if (!prefix) return say;
-    } else {
-      prefix = cleanPrefix(raw);
-      if (!prefix) throw new Error('style rejected');
-    }
+    // Модель иногда повторяет готовый ответ внутри «вводной» фразы — целиком
+    // или обрезанно. Сначала снимаем повтор, затем проверяем оставшуюся
+    // вводную часть обычными правилами.
+    const before = extractPrefix(raw, core);
+    if (before === null || !before.trim()) return say;
+    const prefix = cleanPrefix(before);
+    if (!prefix) throw new Error('style rejected');
 
+    const lowerCore = core.toLowerCase();
     const lowerPrefix = prefix.toLowerCase();
     if (lowerCore.startsWith(lowerPrefix) || lowerCore.includes(lowerPrefix)) return say;
     return [prefix + ' ' + core, ...say.slice(1)];
