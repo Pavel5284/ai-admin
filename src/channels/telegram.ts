@@ -58,6 +58,17 @@ bot.command('start', (ctx) => {
   );
 });
 
+// /reset — забыть текущий диалог и начать с чистого листа. Полезно, если
+// клиент передумал посреди записи и вернулся позже.
+bot.command('reset', (ctx) => {
+  if (!checkLimit(ctx)) return;
+  return send(ctx.chat.id, ctx.from?.id ?? ctx.chat.id, { type: 'reset' })
+    .catch(async (e: unknown) => {
+      console.error('telegram:', (e as Error).message);
+      await ctx.reply('Что-то сломалось у меня, попробуйте ещё раз через минуту.');
+    });
+});
+
 bot.on('message:text', async (ctx) => {
   if (!checkLimit(ctx)) return;
   try {

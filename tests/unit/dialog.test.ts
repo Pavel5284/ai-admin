@@ -458,3 +458,24 @@ describe('записи по Telegram-аккаунту', () => {
     expect(said).not.toContain('Мужская стрижка');
   });
 });
+
+describe('сброс диалога', () => {
+  it('/reset выбрасывает начатую запись и начинает заново', async () => {
+    const { ctx } = await play(['хочу записаться', 'стрижка', 'завтра']);
+    expect(ctx.slots.service).toBe('haircut');
+
+    const res = await step(ctx, { type: 'reset' }, NOW);
+    expect(res.ctx).not.toBe(ctx);                 // старый контекст не переиспользуем
+    expect(res.ctx.state).toBe('INTENT');
+    expect(res.ctx.slots).toEqual({});
+    expect(res.ctx.history.filter((h) => h.role === 'user')).toHaveLength(0);
+    expect(res.say.join(' ')).toContain('начнём заново');
+    expect(res.say.join(' ')).toContain('Что вам нужно');
+    expect(res.humanize).toBe(false);
+
+    // Следующая реплика продолжает уже новый диалог, без повторного приветствия.
+    const next = await step(res.ctx, { type: 'user_text', text: 'стрижка' }, NOW);
+    expect(next.ctx.state).toBe('ASK_DATE');
+    expect(next.say.join(' ')).not.toContain('начнём заново');
+  });
+});

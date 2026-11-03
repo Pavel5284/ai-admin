@@ -1,6 +1,7 @@
 import type {
   Action, BotEvent, BookingRef, Ctx, NearestOption, StateId, StepResult,
 } from './states';
+import { newCtx } from './states';
 import { R } from './replies';
 import {
   checkGlobalIntents, goto, handoff, misunderstood, onBargeIn, onSilence, pick, say,
@@ -19,6 +20,18 @@ type Handler = (ctx: Ctx, nlu: Nlu, now: Date) => StepResult | Promise<StepResul
 
 export async function step(ctx: Ctx, ev: BotEvent, now: Date): Promise<StepResult> {
   ctx.lastActivityAt = now.getTime();
+
+  // /reset: клиент хочет начать заново. Возвращаем новый ctx, чтобы не тянуть
+  // старые слоты, перенос, историю и незавершённые действия.
+  if (ev.type === 'reset') {
+    const fresh = newCtx(ctx.sessionId, now);
+    const res = goto(fresh, 'INTENT', R.askIntent);
+    return commit(fresh, ev, {
+      ...res,
+      say: [...pick(fresh, R.reset), ...res.say],
+      humanize: false,
+    }, now);
+  }
 
   // 1. глобальные перехваты: работают в любом состоянии
   const global = checkGlobalIntents(ctx, ev);

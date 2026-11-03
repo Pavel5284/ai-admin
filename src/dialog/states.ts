@@ -70,6 +70,7 @@ export type BookingRef = {
 
 export type BotEvent =
   | { type: 'user_text'; text: string }
+  | { type: 'reset' }
   | { type: 'silence'; ms: number }
   | { type: 'barge_in'; text: string }
   | { type: 'non_text'; kind: 'voice' | 'photo' | 'sticker' };
