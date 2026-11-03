@@ -43,8 +43,9 @@ function checkLimit(ctx: Context): boolean {
 }
 
 /** Отправляет в автомат событие и возвращает все реплики куда следует. */
-async function send(chatId: number, ev: BotEvent): Promise<void> {
-  const say = await handleEvent('tg:' + chatId, ev);
+async function send(chatId: number, userId: number, ev: BotEvent): Promise<void> {
+  // Личность — именно пользователь (from.id), а не чат: в группе chat.id общий.
+  const say = await handleEvent('tg:' + userId, ev);
   for (const s of say) await bot.api.sendMessage(chatId, s);
 }
 
@@ -60,7 +61,7 @@ bot.command('start', (ctx) => {
 bot.on('message:text', async (ctx) => {
   if (!checkLimit(ctx)) return;
   try {
-    await send(ctx.chat.id, { type: 'user_text', text: ctx.message.text });
+    await send(ctx.chat.id, ctx.from?.id ?? ctx.chat.id, { type: 'user_text', text: ctx.message.text });
   } catch (e) {
     console.error('telegram:', (e as Error).message);
     await ctx.reply('Что-то сломалось у меня, попробуйте ещё раз через минуту.');
@@ -70,15 +71,15 @@ bot.on('message:text', async (ctx) => {
 // Нетекстовые: реакция бота одинаковая на всех каналах и попадает в лог.
 bot.on('message:voice', (ctx) => {
   if (!checkLimit(ctx)) return;
-  void send(ctx.chat.id, { type: 'non_text', kind: 'voice' }).catch(logErr);
+  void send(ctx.chat.id, ctx.from?.id ?? ctx.chat.id, { type: 'non_text', kind: 'voice' }).catch(logErr);
 });
 bot.on('message:photo', (ctx) => {
   if (!checkLimit(ctx)) return;
-  void send(ctx.chat.id, { type: 'non_text', kind: 'photo' }).catch(logErr);
+  void send(ctx.chat.id, ctx.from?.id ?? ctx.chat.id, { type: 'non_text', kind: 'photo' }).catch(logErr);
 });
 bot.on('message:sticker', (ctx) => {
   if (!checkLimit(ctx)) return;
-  void send(ctx.chat.id, { type: 'non_text', kind: 'sticker' }).catch(logErr);
+  void send(ctx.chat.id, ctx.from?.id ?? ctx.chat.id, { type: 'non_text', kind: 'sticker' }).catch(logErr);
 });
 
 // Всё остальное (документы, видео, контакты) — просим текстом.

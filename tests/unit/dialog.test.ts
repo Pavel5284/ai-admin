@@ -5,14 +5,20 @@ import { FIXTURE_SLOTS, useFixtureCatalog } from './fixtures';
 
 // Слоты считает БД, а юнит-тесты не должны зависеть от живой базы:
 // подменяем только поиск свободных окон, всё остальное — настоящее.
-const { findSlotsMock, nearestSlotsMock } = vi.hoisted(() => ({
+const { findSlotsMock, nearestSlotsMock, findBookingsByTelegramIdMock } = vi.hoisted(() => ({
   findSlotsMock: vi.fn(),
   nearestSlotsMock: vi.fn(),
+  findBookingsByTelegramIdMock: vi.fn(),
 }));
 
 vi.mock('../../src/services/slots', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../src/services/slots')>();
-  return { ...actual, findSlots: findSlotsMock, nearestSlots: nearestSlotsMock };
+  return {
+    ...actual,
+    findSlots: findSlotsMock,
+    nearestSlots: nearestSlotsMock,
+    findBookingsByTelegramId: findBookingsByTelegramIdMock,
+  };
 });
 
 // Реальный вызов LLM в юнит-тестах недопустим: правила справляются сами,
@@ -50,11 +56,23 @@ beforeAll(() => {
     return slots;
   });
   nearestSlotsMock.mockResolvedValue([]);
+  findBookingsByTelegramIdMock.mockResolvedValue([]);
 });
 
 /** Прогоняет реплики через автомат и собирает всё, что сказал бот. */
 async function play(lines: string[]) {
   const ctx = newCtx('test:dialog', NOW);
+  const said: string[] = [];
+  for (const line of lines) {
+    const res = await step(ctx, { type: 'user_text', text: line }, NOW);
+    said.push(...res.say);
+  }
+  return { ctx, said: said.join(' ') };
+}
+
+/** То же, но с Telegram-аккаунтом: FIND_BOOKING ищет по from.id. */
+async function playAs(telegramId: number, lines: string[]) {
+  const ctx = newCtx('tg:' + telegramId, NOW);
   const said: string[] = [];
   for (const line of lines) {
     const res = await step(ctx, { type: 'user_text', text: line }, NOW);
@@ -380,5 +398,34 @@ describe('выбор окна и вопросы посреди записи', ()
     const { ctx } = await play(['хочу подстричся во скок можно завтра']);
     expect(ctx.state).toBe('ASK_TIME');
     expect(ctx.slots.date).toBe('2026-10-21');
+  });
+});
+
+describe('записи по Telegram-аккаунту', () => {
+  const booking = {
+    id: 42, masterId: 1, masterName: 'Артём',
+    serviceCode: 'haircut', serviceTitle: 'Мужская стрижка',
+    date: '2026-10-21', time: '12:00',
+  };
+
+  it('перенос ищет запись по from.id, а не по телефону', async () => {
+    findBookingsByTelegramIdMock.mockResolvedValueOnce([booking]);
+    const { ctx, said } = await playAs(1001, ['хочу перенести запись']);
+    expect(findBookingsByTelegramIdMock).toHaveBeenCalledWith(1001, NOW);
+    expect(said).not.toContain('номер телефона');
+    expect(ctx.state).toBe('ASK_DATE');
+    expect(ctx.bookingId).toBe(42);
+    expect(ctx.slots.service).toBe('haircut');
+    expect(ctx.slots.masterId).toBe(1);
+  });
+
+  it('старые записи без привязки не показываются — только администратор', async () => {
+    findBookingsByTelegramIdMock.mockResolvedValueOnce([]);
+    const { ctx, said } = await playAs(1002, ['хочу отменить запись']);
+    expect(ctx.state).toBe('HANDOFF');
+    expect(ctx.outcome).toBe('handoff');
+    expect(said).toContain('Не нашёл предстоящих записей');
+    expect(said).toContain('телефон');
+    expect(said).not.toContain('Мужская стрижка');
   });
 });

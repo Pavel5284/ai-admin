@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import { step } from './dialog/machine';
 import { humanize, replaceLastBotTurns } from './dialog/humanize';
-import { newCtx, type BotEvent } from './dialog/states';
+import { newCtx, telegramIdFromSession, type BotEvent } from './dialog/states';
 import { loadCtx, saveCtx, logTurn } from './services/sessions';
 import { executeActions } from './services/actions';
 import { loadCatalog } from './services/slots';
@@ -31,6 +31,11 @@ export function handleEvent(sessionId: string, ev: BotEvent, now = new Date()): 
     await ensureCatalog();
     let ctx = await loadCtx(sessionId);
     if (!ctx || ctx.state === 'DONE') ctx = newCtx(sessionId, now);   // завершённый диалог: начинаем новый
+    // Старые сессии сохранили ctx без telegramId: восстанавливаем из session_id.
+    if (ctx.telegramId == null) {
+      const telegramId = telegramIdFromSession(sessionId);
+      if (telegramId != null) ctx.telegramId = telegramId;
+    }
     const from = ctx.state;
 
     const result = await step(ctx, ev, now);

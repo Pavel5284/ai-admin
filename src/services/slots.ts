@@ -35,6 +35,7 @@ export type FreeSlot = { time: string; masterId: number; masterName: string };
 export type Booking = BookingRef & {
   serviceId: number;
   clientPhone: string;
+  clientTelegramId: number | null;
   clientName: string | null;
   status: string;
 };
@@ -288,6 +289,7 @@ async function findFreeMaster(
  */
 export async function createBooking(
   slots: Slots,
+  clientTelegramId?: number,
 ): Promise<{ ok: true; id: number } | { ok: false; reason: string }> {
   const service = serviceByCode(slots.service);
   if (!service || !slots.date || !slots.time) return { ok: false, reason: 'incomplete' };
@@ -299,12 +301,13 @@ export async function createBooking(
 
   try {
     const { rows } = await pool.query(
-      `INSERT INTO bookings (master_id, service_id, starts_at, ends_at, client_name, client_phone)
+      `INSERT INTO bookings (master_id, service_id, starts_at, ends_at, client_name, client_phone,
+                             client_telegram_id)
        VALUES ($1, $2, $3::timestamptz,
-               $3::timestamptz + make_interval(mins => $4), $5, $6)
+               $3::timestamptz + make_interval(mins => $4), $5, $6, $7)
        RETURNING id`,
       [masterId, service.id, `${slots.date} ${slots.time}:00`, service.durationMin,
-        slots.name ?? null, slots.phone],
+        slots.name ?? null, slots.phone, clientTelegramId ?? null],
     );
     return { ok: true, id: rows[0].id as number };
   } catch (e) {
@@ -313,22 +316,15 @@ export async function createBooking(
   }
 }
 
-/** Записи клиента по телефону — для переноса и отмены. */
-export async function findBookingsByPhone(phone: string): Promise<Booking[]> {
-  const { rows } = await pool.query(
-    `SELECT b.id, b.master_id, m.name AS master_name, b.service_id, s.code AS service_code,
-            s.title AS service_title,
-            to_char(b.starts_at AT TIME ZONE current_setting('TimeZone'), 'YYYY-MM-DD') AS day,
-            to_char(b.starts_at AT TIME ZONE current_setting('TimeZone'), 'HH24:MI') AS slot_time,
-            b.client_phone, b.client_name, b.status
-       FROM bookings b
-       JOIN masters m  ON m.id = b.master_id
-       JOIN services s ON s.id = b.service_id
-      WHERE b.client_phone = $1 AND b.status = 'confirmed'
-      ORDER BY b.starts_at`,
-    [phone],
-  );
-  return rows.map((r: any) => ({
+const BOOKING_COLUMNS = `
+  b.id, b.master_id, m.name AS master_name, b.service_id, s.code AS service_code,
+  s.title AS service_title,
+  to_char(b.starts_at AT TIME ZONE current_setting('TimeZone'), 'YYYY-MM-DD') AS day,
+  to_char(b.starts_at AT TIME ZONE current_setting('TimeZone'), 'HH24:MI') AS slot_time,
+  b.client_phone, b.client_telegram_id, b.client_name, b.status`;
+
+function toBooking(r: any): Booking {
+  return {
     id: r.id as number,
     masterId: r.master_id as number,
     masterName: r.master_name as string,
@@ -338,18 +334,71 @@ export async function findBookingsByPhone(phone: string): Promise<Booking[]> {
     date: r.day as string,
     time: r.slot_time as string,
     clientPhone: r.client_phone as string,
+    // pg отдаёт bigint строкой; Telegram id помещается в number.
+    clientTelegramId: r.client_telegram_id == null ? null : Number(r.client_telegram_id),
     clientName: r.client_name as string | null,
     status: r.status as string,
-  }));
+  };
 }
 
-/** Отмена записи. */
-export async function cancelBooking(id: number): Promise<boolean> {
+/**
+ * Записи клиента по телефону — только для CLI/локального fallback.
+ * В Telegram телефон не является ключом доступа: см. findBookingsByTelegramId.
+ */
+export async function findBookingsByPhone(phone: string, from?: Date): Promise<Booking[]> {
+  const params: (string | Date)[] = [phone];
+  let future = '';
+  if (from) {
+    params.push(from.toISOString());
+    future = ' AND b.starts_at > $2';
+  }
+  const { rows } = await pool.query(
+    `SELECT ${BOOKING_COLUMNS}
+       FROM bookings b
+       JOIN masters m  ON m.id = b.master_id
+       JOIN services s ON s.id = b.service_id
+      WHERE b.client_phone = $1 AND b.status = 'confirmed'${future}
+      ORDER BY b.starts_at`,
+    params,
+  );
+  return rows.map(toBooking);
+}
+
+/**
+ * Предстоящие записи, привязанные к Telegram-аккаунту.
+ * Старые записи с client_telegram_id = NULL сюда не попадают.
+ */
+export async function findBookingsByTelegramId(
+  telegramId: number,
+  now: Date,
+): Promise<Booking[]> {
+  const { rows } = await pool.query(
+    `SELECT ${BOOKING_COLUMNS}
+       FROM bookings b
+       JOIN masters m  ON m.id = b.master_id
+       JOIN services s ON s.id = b.service_id
+      WHERE b.client_telegram_id = $1
+        AND b.status = 'confirmed'
+        AND b.starts_at > $2
+      ORDER BY b.starts_at`,
+    [telegramId, now.toISOString()],
+  );
+  return rows.map(toBooking);
+}
+
+/** Отмена записи. telegramId необязателен для CLI, в Telegram — проверка владельца. */
+export async function cancelBooking(id: number, telegramId?: number): Promise<boolean> {
+  const params: number[] = [id];
+  let owner = '';
+  if (telegramId != null) {
+    params.push(telegramId);
+    owner = ' AND client_telegram_id = $2';
+  }
   const { rows } = await pool.query(
     `UPDATE bookings SET status = 'cancelled'
-      WHERE id = $1 AND status = 'confirmed'
+      WHERE id = $1 AND status = 'confirmed'${owner}
       RETURNING id`,
-    [id],
+    params,
   );
   return rows.length > 0;
 }
@@ -360,15 +409,22 @@ export async function rescheduleBooking(
   date: string,
   time: string,
   durationMin: number,
+  telegramId?: number,
 ): Promise<{ ok: true } | { ok: false; reason: string }> {
+  const params: (number | string)[] = [id, `${date} ${time}:00`, durationMin];
+  let owner = '';
+  if (telegramId != null) {
+    params.push(telegramId);
+    owner = ' AND client_telegram_id = $4';
+  }
   try {
     const { rows } = await pool.query(
       `UPDATE bookings
           SET starts_at = $2::timestamptz,
               ends_at   = $2::timestamptz + make_interval(mins => $3)
-        WHERE id = $1 AND status = 'confirmed'
+        WHERE id = $1 AND status = 'confirmed'${owner}
         RETURNING id`,
-      [id, `${date} ${time}:00`, durationMin],
+      params,
     );
     return rows.length ? { ok: true } : { ok: false, reason: 'not_found' };
   } catch (e) {

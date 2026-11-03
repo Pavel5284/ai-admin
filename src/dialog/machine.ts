@@ -11,8 +11,8 @@ import { outsideWorkHours } from '../nlu/time';
 import { answerSmalltalk } from './smalltalk';
 import { answerKb } from '../services/kb';
 import {
-  allMasters, findBookingsByPhone, findSlots, matchMaster, masterById, nearestSlots, serviceTitle,
-  type FreeSlot,
+  allMasters, findBookingsByPhone, findBookingsByTelegramId, findSlots, matchMaster, masterById,
+  nearestSlots, serviceTitle, type FreeSlot,
 } from '../services/slots';
 
 type Handler = (ctx: Ctx, nlu: Nlu, now: Date) => StepResult | Promise<StepResult>;
@@ -346,6 +346,8 @@ function afterBookingFound(ctx: Ctx, booking: BookingRef): StepResult {
     // Перенос: та же услуга и мастер, новая дата и время.
     ctx.slots.service = booking.serviceCode;
     ctx.slots.masterId = booking.masterId;
+    // Телефон уже есть в записи: по аккаунту его не спрашиваем.
+    if (booking.clientPhone) ctx.slots.phone = booking.clientPhone;
     delete ctx.slots.date;
     delete ctx.slots.time;
     delete ctx.slots.timeRange;
@@ -358,6 +360,48 @@ function afterBookingFound(ctx: Ctx, booking: BookingRef): StepResult {
   ctx.lastAsked = 'CONFIRM';
   const summary = `${booking.serviceTitle}, ${booking.date} ${booking.time}, мастер ${booking.masterName}`;
   return { ctx, say: [R.cancelBooking(summary)], actions: [] };
+}
+
+/** Показать найденные записи или сразу перейти к выбранной. */
+function showFoundBookings(ctx: Ctx, bookings: BookingRef[]): StepResult {
+  if (bookings.length > 1) {
+    ctx.bookings = bookings;
+    const list = bookings
+      .map((b, i) => `${i + 1}) ${b.serviceTitle}, ${b.date} ${b.time}`)
+      .join(', ');
+    return goto(ctx, 'FIND_BOOKING', [`Нашёл несколько записей: ${list}. Какую переносим или отменяем?`]);
+  }
+  ctx.bookingId = bookings[0].id;
+  return afterBookingFound(ctx, bookings[0]);
+}
+
+/**
+ * Найти запись для переноса/отмены. В Telegram — только по аккаунту,
+ * без запроса телефона; телефон остаётся fallback для CLI/eval.
+ */
+async function findBooking(ctx: Ctx, nlu: Nlu, now: Date): Promise<StepResult> {
+  if (ctx.telegramId != null) {
+    const bookings = await findBookingsByTelegramId(ctx.telegramId, now);
+    if (!bookings.length) {
+      // Старые записи без привязки не показываем — только администратор.
+      return handoff(ctx, 'booking_not_linked', R.notFoundAccount);
+    }
+    return showFoundBookings(ctx, bookings);
+  }
+
+  if (!ctx.slots.phone) {
+    // Неполный или слишком длинный номер не копим: просим повторить целиком.
+    if (nlu.digits || nlu.phoneStatus) return say(ctx, R.phoneAgain);
+    return goto(ctx, 'FIND_BOOKING', R.askPhone);
+  }
+
+  const bookings = await findBookingsByPhone(ctx.slots.phone, now);
+  if (!bookings.length) {
+    // Записей нет — предложим записаться заново.
+    clearBookingSlots(ctx);
+    return goto(ctx, 'ASK_SERVICE', R.notFoundBooking);
+  }
+  return showFoundBookings(ctx, bookings);
 }
 
 /** Чистим слоты записи — например, когда по телефону ничего не нашли. */
@@ -458,11 +502,11 @@ const handlers: Record<StateId, Handler> = {
     if (nlu.intent === 'handoff') return handoff(ctx, 'client_asked_operator');
     if (nlu.intent === 'reschedule') {
       ctx.pending = 'reschedule';
-      return goto(ctx, 'FIND_BOOKING', R.askPhone);
+      return findBooking(ctx, nlu, now);
     }
     if (nlu.intent === 'cancel') {
       ctx.pending = 'cancel';
-      return goto(ctx, 'FIND_BOOKING', R.askPhone);
+      return findBooking(ctx, nlu, now);
     }
     // «Когда есть ближайшее?» — не дата, а просьба показать окна.
     // Если услуга ещё не названа, сначала спросим её и запомним запрос.
@@ -704,7 +748,7 @@ const handlers: Record<StateId, Handler> = {
     if (ctx.pending === 'cancel') {
       if (nlu.yes) {
         const actions: Action[] = ctx.bookingId
-          ? [{ type: 'cancel_booking', id: ctx.bookingId }]
+          ? [{ type: 'cancel_booking', id: ctx.bookingId, telegramId: ctx.telegramId }]
           : [];
         ctx.slots = {};
         ctx.pending = undefined;
@@ -729,6 +773,7 @@ const handlers: Record<StateId, Handler> = {
           id: ctx.bookingId,
           date: ctx.slots.date ?? '',
           time: ctx.slots.time ?? '',
+          telegramId: ctx.telegramId,
         }];
         // bookingId и pending остаются до успешного ответа CRM/БД: если слот
         // заняли в последнюю секунду, executeActions вернёт нас в OFFER_SLOTS
@@ -768,7 +813,7 @@ const handlers: Record<StateId, Handler> = {
       ctx.state = 'DONE';
       ctx.outcome = 'booked';
       const slots = { ...ctx.slots };
-      const actions: Action[] = [{ type: 'create_booking', slots }];
+      const actions: Action[] = [{ type: 'create_booking', slots, telegramId: ctx.telegramId }];
       return { ctx, say: pick(ctx, R.booked), actions };
     }
 
@@ -780,7 +825,7 @@ const handlers: Record<StateId, Handler> = {
     return misunderstood(ctx, 'CONFIRM');
   },
 
-  FIND_BOOKING: async (ctx, nlu, _now) => {
+  FIND_BOOKING: async (ctx, nlu, now) => {
     absorb(ctx, nlu);
 
     // Клиент выбирает одну из нескольких найденных записей.
@@ -792,27 +837,7 @@ const handlers: Record<StateId, Handler> = {
       return afterBookingFound(ctx, chosen);
     }
 
-    if (!ctx.slots.phone) {
-      // Неполный или слишком длинный номер не копим: просим повторить целиком.
-      if (nlu.digits || nlu.phoneStatus) return say(ctx, R.phoneAgain);
-      return goto(ctx, 'FIND_BOOKING', R.askPhone);
-    }
-
-    const bookings = await findBookingsByPhone(ctx.slots.phone);
-    if (!bookings.length) {
-      // Записей нет — предложим записаться заново.
-      clearBookingSlots(ctx);
-      return goto(ctx, 'ASK_SERVICE', R.notFoundBooking);
-    }
-    if (bookings.length > 1) {
-      ctx.bookings = bookings;
-      const list = bookings
-        .map((b, i) => `${i + 1}) ${b.serviceTitle}, ${b.date} ${b.time}`)
-        .join(', ');
-      return goto(ctx, 'FIND_BOOKING', [`Нашёл несколько записей: ${list}. Какую переносим или отменяем?`]);
-    }
-    ctx.bookingId = bookings[0].id;
-    return afterBookingFound(ctx, bookings[0]);
+    return findBooking(ctx, nlu, now);
   },
 
   /**

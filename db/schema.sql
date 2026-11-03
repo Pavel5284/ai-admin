@@ -36,6 +36,9 @@ CREATE TABLE bookings (
                         ends_at      timestamptz NOT NULL,
                         client_name  text,
                         client_phone text NOT NULL,
+                        -- Telegram user id (from.id). NULL у старых записей и CLI:
+                        -- такие записи не ищем по аккаунту, только через администратора.
+                        client_telegram_id bigint,
                         status       text NOT NULL DEFAULT 'confirmed',   -- confirmed / cancelled
                         crm_id       text,
                         created_at   timestamptz NOT NULL DEFAULT now()
@@ -45,6 +48,10 @@ CREATE TABLE bookings (
 ALTER TABLE bookings ADD CONSTRAINT no_overlap
   EXCLUDE USING gist (master_id WITH =, tstzrange(starts_at, ends_at) WITH &&)
   WHERE (status = 'confirmed');
+
+-- Поиск предстоящих записей по Telegram-аккаунту.
+CREATE INDEX bookings_client_telegram_id_idx
+  ON bookings (client_telegram_id, starts_at);
 
 
 CREATE TABLE sessions (

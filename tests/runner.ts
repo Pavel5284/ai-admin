@@ -54,6 +54,8 @@ type Scenario = {
   title: string;
   tags?: string[];
   split?: 'dev' | 'holdout';
+  /** Telegram user id: FIND_BOOKING ищет записи только по этому аккаунту. */
+  telegram_id?: number;
   /** Переменные окружения только на время сценария: сбой CRM или LLM. */
   env?: Record<string, string>;
   /** SQL после фикстуры и до первой реплики (дополнительные записи клиента). */
@@ -166,7 +168,7 @@ let bookedScenarios = 0;
 const styleFallbacksBefore = stats.styleFallbacks ?? 0;
 
 for (const s of selected) {
-  const sessionId = 'eval:' + s.id;
+  const sessionId = s.telegram_id != null ? 'tg:' + s.telegram_id : 'eval:' + s.id;
   const failures: string[] = [];
   const now = new Date(s.now);
   const savedEnv = new Map<string, string | undefined>();

@@ -8,7 +8,8 @@
 import { it, expect, describe, beforeAll, afterAll } from 'vitest';
 import { pool } from '../../src/services/db';
 import {
-  cancelBooking, createBooking, findBookingsByPhone, findSlots, loadCatalog, rescheduleBooking,
+  cancelBooking, createBooking, findBookingsByPhone, findBookingsByTelegramId,
+  findSlots, loadCatalog, rescheduleBooking,
 } from '../../src/services/slots';
 
 const NOW = new Date();
@@ -19,6 +20,7 @@ const tomorrow = (() => {
 })();
 
 const PHONE = '+79000000099';
+const TELEGRAM_ID = 9000000001;
 
 // Проверяем базу до описания тестов: skipIf вычисляется на этапе сбора,
 // поэтому проверка должна быть синхронной относительно describe.
@@ -84,6 +86,50 @@ describe.skipIf(!dbAvailable)('слоты в PostgreSQL', () => {
 
     expect(await cancelBooking(created.id)).toBe(true);
     expect(await findBookingsByPhone(PHONE)).toHaveLength(0);
+  });
+
+  it('находит предстоящую запись по Telegram id и проверяет владельца при изменении', async () => {
+    const slots = await findSlots('haircut', tomorrow, NOW);
+    const slot = slots[0]!;
+
+    const created = await createBooking({
+      service: 'haircut', date: tomorrow, time: slot.time,
+      masterId: slot.masterId, phone: PHONE,
+    }, TELEGRAM_ID);
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+
+    const found = await findBookingsByTelegramId(TELEGRAM_ID, NOW);
+    expect(found.map((b) => b.id)).toContain(created.id);
+    expect(found[0]!.clientTelegramId).toBe(TELEGRAM_ID);
+
+    // Чужой Telegram id не может отменить или перенести запись.
+    expect(await cancelBooking(created.id, TELEGRAM_ID + 1)).toBe(false);
+    expect(await rescheduleBooking(created.id, tomorrow, slot.time, 60, TELEGRAM_ID + 1))
+      .toEqual({ ok: false, reason: 'not_found' });
+
+    expect(await cancelBooking(created.id, TELEGRAM_ID)).toBe(true);
+    expect(await findBookingsByTelegramId(TELEGRAM_ID, NOW)).toHaveLength(0);
+  });
+
+  it('не отдаёт прошедшие записи по Telegram id', async () => {
+    const { rows } = await pool.query<{ id: number }>(
+      `INSERT INTO bookings (master_id, service_id, starts_at, ends_at,
+                             client_name, client_phone, client_telegram_id)
+       SELECT m.id, s.id, now() - interval '1 day',
+              now() - interval '1 day' + interval '60 minutes',
+              'Прошлая', $1, $2
+         FROM masters m JOIN services s ON s.code = 'haircut'
+        WHERE m.name = 'Артём'
+       RETURNING id`,
+      [PHONE, TELEGRAM_ID],
+    );
+    const pastId = rows[0]!.id;
+
+    const found = await findBookingsByTelegramId(TELEGRAM_ID, NOW);
+    expect(found.map((b) => b.id)).not.toContain(pastId);
+
+    await pool.query('DELETE FROM bookings WHERE id = $1', [pastId]);
   });
 
   it('не даёт записать дважды на одно время: ловит занятый слот', async () => {

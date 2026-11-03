@@ -1,0 +1,23 @@
+id: '120-account-not-linked'
+title: Старая запись без Telegram-привязки не показывается — только администратор
+tags: [privacy, handoff-justified]
+split: dev
+telegram_id: 1002
+now: '2026-10-15T12:00:00+03:00'
+setup: |
+  INSERT INTO bookings (master_id, service_id, starts_at, ends_at, client_name, client_phone,
+                        client_telegram_id)
+  SELECT m.id, s.id, '2026-10-16 12:00+03'::timestamptz,
+         '2026-10-16 12:00+03'::timestamptz + make_interval(mins => s.duration_min),
+         'Иван', '+79160000008', NULL
+  FROM masters m JOIN services s ON s.code = 'haircut'
+  WHERE m.name = 'Артём';
+turns:
+  - user: хочу отменить запись
+    expect:
+      state: HANDOFF
+      say_contains: 'Не нашёл предстоящих записей'
+      say_not_contains: ['Мужская стрижка', '2026-10-16']
+final:
+  outcome: handoff
+  booking: none

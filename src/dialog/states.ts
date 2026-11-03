@@ -25,6 +25,8 @@ export type Turn = { role: 'user' | 'bot'; text: string; at: number };
 
 export type Ctx = {
   sessionId: string;
+  /** Telegram user id (from.id), если диалог пришёл из Telegram. */
+  telegramId?: number;
   state: StateId;
   slots: Slots;
   retries: Record<string, number>;
@@ -62,6 +64,8 @@ export type BookingRef = {
   serviceTitle: string;
   date: string;              // 'YYYY-MM-DD'
   time: string;              // 'HH:mm'
+  /** Телефон из записи: при переносе не спрашиваем его заново. */
+  clientPhone?: string;
 };
 
 export type BotEvent =
@@ -71,9 +75,9 @@ export type BotEvent =
   | { type: 'non_text'; kind: 'voice' | 'photo' | 'sticker' };
 
 export type Action =
-  | { type: 'create_booking'; slots: Slots }
-  | { type: 'cancel_booking'; id: number }
-  | { type: 'reschedule_booking'; id: number; date: string; time: string }
+  | { type: 'create_booking'; slots: Slots; telegramId?: number }
+  | { type: 'cancel_booking'; id: number; telegramId?: number }
+  | { type: 'reschedule_booking'; id: number; date: string; time: string; telegramId?: number }
   | { type: 'handoff'; reason: string; contact?: string }
   | { type: 'end' };
 
@@ -90,6 +94,18 @@ export type StepResult = {
   humanize?: boolean;
 };
 
+/** Telegram user id из session_id вида `tg:<id>`; для CLI/eval — undefined. */
+export function telegramIdFromSession(sessionId: string): number | undefined {
+  const m = /^tg:(-?\d+)$/.exec(sessionId);
+  return m ? Number(m[1]) : undefined;
+}
+
 export const newCtx = (sessionId: string, now: Date): Ctx => ({
-  sessionId, state: 'START', slots: {}, retries: {}, history: [], lastActivityAt: now.getTime(),
+  sessionId,
+  telegramId: telegramIdFromSession(sessionId),
+  state: 'START',
+  slots: {},
+  retries: {},
+  history: [],
+  lastActivityAt: now.getTime(),
 });

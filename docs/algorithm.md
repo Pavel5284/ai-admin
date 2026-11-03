@@ -199,17 +199,17 @@ on_not_understood: [ask_yes_or_no, handoff]
 ```
 
 ### FIND_BOOKING (перенос и отмена)
-Ищет записи по телефону в БД (`findBookingsByPhone`). Ноль записей → предложить новую запись или оператора. Несколько → попросить выбрать номер записи. Далее перенос идёт через ASK_DATE и ASK_TIME, отмена — через подтверждение CONFIRM. Отмена и перенос — отдельные действия (`cancel_booking`, `reschedule_booking`), которые выполняет `src/services/actions.ts`.
+В Telegram ищет только предстоящие записи, привязанные к аккаунту: `client_telegram_id = from.id` и `starts_at > now`. Телефон не спрашивает и не использует как ключ доступа. Ноль записей → передача администратору (`booking_not_linked`): старые записи без Telegram-привязки не показываются. Несколько → попросить выбрать номер записи. Далее перенос идёт через ASK_DATE и ASK_TIME, отмена — через подтверждение CONFIRM. Отмена и перенос — отдельные действия (`cancel_booking`, `reschedule_booking`), которые выполняет `src/services/actions.ts`; в Telegram они дополнительно проверяют владельца по `client_telegram_id`. В CLI/eval, где Telegram-аккаунта нет, остаётся fallback `findBookingsByPhone`.
 
 ```yaml
 state: FIND_BOOKING
-ask: 'Назовите номер телефона, по которому ищем запись.'
-expects: [phone]
+ask: 'Найду предстоящие записи по вашему Telegram-аккаунту.'
+expects: [booking_choice]
 also_accepts: [cancel, reschedule]
 on_success: found_booking        # → CONFIRM (отмена) или ASK_DATE (перенос)
-on_not_found: offer_new_booking_or_operator
+on_not_found: handoff_booking_not_linked
 on_several: ask_which_booking
-on_not_understood: [ask_phone_again, handoff]
+on_not_understood: [ask_choice_again, handoff]
 ```
 
 ### FAQ
@@ -414,16 +414,16 @@ LLM не может выдумать smalltalk. Если детектор пра
 10. «время»
 
 ### FIND_BOOKING
-1. «+79161234567»
-2. «забыл номер»
-3. «а это тот же телефон»
-4. «да»
-5. «перенеси на субботу»
-6. «отмени запись»
-7. «не найдусь»
-8. «мой номер 8-916-234-56-78»
-9. «запиши на новый номер»
-10. «а сколько у меня записей?»
+1. «1»
+2. «вторая»
+3. «да»
+4. «перенеси на субботу»
+5. «отмени запись»
+6. «у меня нет записей»
+7. «это не моя запись»
+8. «а сколько у меня записей?»
+9. «назад»
+10. «оператор»
 
 ### FAQ
 1. «сколько стоит стрижка?»

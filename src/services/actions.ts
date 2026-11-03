@@ -7,7 +7,7 @@ export async function executeActions(ctx: Ctx, actions: Action[]): Promise<strin
   const extra: string[] = [];
   for (const a of actions) {
     if (a.type === 'create_booking') {
-      const r = await createBooking(a.slots);       // возвращает { ok: true, id } или { ok: false, reason }
+      const r = await createBooking(a.slots, a.telegramId);  // { ok: true, id } или { ok: false, reason }
       if (!r.ok) {
         extra.push('К сожалению, это время только что заняли. Давайте выберем другое.');
         ctx.state = 'OFFER_SLOTS';
@@ -24,12 +24,12 @@ export async function executeActions(ctx: Ctx, actions: Action[]): Promise<strin
       }
     }
     if (a.type === 'cancel_booking') {
-      const done = await cancelBooking(a.id);
+      const done = await cancelBooking(a.id, a.telegramId);
       if (!done) extra.push('Не удалось отменить запись. Позвоните администратору.');
     }
     if (a.type === 'reschedule_booking') {
       const service = await serviceDuration(ctx.slots.service);
-      const r = await rescheduleBooking(a.id, a.date, a.time, service);
+      const r = await rescheduleBooking(a.id, a.date, a.time, service, a.telegramId);
       if (!r.ok) {
         extra.push(r.reason === 'slot_taken'
           ? 'Это время только что заняли. Давайте выберем другое.'

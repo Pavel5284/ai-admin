@@ -274,6 +274,9 @@ docker compose -p ai-admin -f docker-compose.vps.yml exec db \
 7. Имя `иван` отображается как `Иван`.
 8. «а когда есть время ближайшее? мне срочно» — бот показывает свободные
    окна, а не отвечает «Не совсем понял дату».
+9. «хочу перенести запись» — бот не спрашивает телефон, а ищет запись по
+   Telegram-аккаунту. Старая запись без привязки не показывается: бот
+   передаёт клиента администратору.
 
 ## 8. Типовые ошибки
 
@@ -293,8 +296,25 @@ docker compose -p ai-admin -f docker-compose.vps.yml exec db \
 
 ## 9. Обновление
 
-Повторить шаги 2–4. На сервере сначала сохранить текущий образ как
-`previous`, чтобы был откат:
+Повторить шаги 2–4. Если в обновлении есть миграция БД, применить её
+до перезапуска бота. Для привязки записей к Telegram локально передать
+миграции:
+
+```powershell
+scp -i $HOME\.ssh\<KEY> -r .\db\migrations root@<VPS_HOST>:/root/db/
+```
+
+На сервере:
+
+```bash
+cd /root
+docker compose -p ai-admin -f docker-compose.vps.yml exec -T db \
+  psql -U app -d admin < db/migrations/001-client-telegram-id.sql
+docker compose -p ai-admin -f docker-compose.vps.yml exec -T db \
+  psql -U app -d admin -c '\d bookings' | grep client_telegram_id
+```
+
+Затем сохранить текущий образ как `previous`, чтобы был откат:
 
 ```bash
 docker tag ai-admin-bot:latest ai-admin-bot:previous 2>/dev/null || true
