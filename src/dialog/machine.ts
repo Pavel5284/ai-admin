@@ -421,12 +421,21 @@ function clearBookingSlots(ctx: Ctx): void {
 async function offerOtherDays(ctx: Ctx, now: Date): Promise<StepResult> {
   delete ctx.nearest;
   const from = ctx.slots.date ?? isoDate(now);
-  const near = await nearestSlots(ctx.slots.service, from, now);
+  // Учитываем уже названные «вечером»/«после обеда» и мастера: иначе бот
+  // предложит утренние окна, а когда клиент выберет день — только вечерние.
+  const near = await nearestSlots(ctx.slots.service, from, now, 7, 3, {
+    masterId: ctx.slots.masterId,
+    range: ctx.slots.timeRange,
+    uniqueTimes: true,
+  });
   if (!near.length) return goto(ctx, 'ASK_DATE', R.noSlots);
   const list = near
-    .map((d) => `${formatDate(d.date, now)} — ${d.slots.map((s) => s.time).join(', ')}`)
+    .map((d) => {
+      const times = [...new Set(d.slots.map((s) => s.time))];
+      return `${formatDate(d.date, now)} — ${times.join(', ')}`;
+    })
     .join('; ');
-  return goto(ctx, 'ASK_DATE', [`${R.noSlots[0]} Ближайшие окна: ${list}. На какой день перенесём?`]);
+  return goto(ctx, 'ASK_DATE', [`${R.noSlots[0]} Ближайшие окна: ${list}. На какой день вам удобно?`]);
 }
 
 /** Клиент сказал неоднозначно — уточняем, слот не заполняем. */

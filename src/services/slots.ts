@@ -197,6 +197,8 @@ ORDER BY s.slot_start, m.id
 export type SlotQuery = {
   range?: { from: string; to: string };
   masterId?: number;
+  /** Для списка дней: не повторять одно и то же время у разных мастеров. */
+  uniqueTimes?: boolean;
 };
 
 export async function findSlots(
@@ -240,7 +242,15 @@ export async function nearestSlots(
   const out: { date: string; slots: FreeSlot[] }[] = [];
   for (let i = 0; i < days && out.length < limit; i++) {
     const date = addDays(fromDate, i);
-    const slots = await findSlots(serviceCode, date, now, opts);
+    let slots = await findSlots(serviceCode, date, now, opts);
+    if (opts.uniqueTimes) {
+      const seen = new Set<string>();
+      slots = slots.filter((s) => {
+        if (seen.has(s.time)) return false;
+        seen.add(s.time);
+        return true;
+      });
+    }
     if (slots.length) out.push({ date, slots: slots.slice(0, 3) });
   }
   return out;

@@ -353,6 +353,35 @@ describe('выбор окна и вопросы посреди записи', ()
     expect(ctx.wantsNearest).toBeUndefined();
   });
 
+  it('если день занят, ближайшие окна учитывают время и мастера', async () => {
+    const ctx = newCtx('test:offer-other-days', NOW);
+    await step(ctx, { type: 'user_text', text: 'хочу записаться' }, NOW);
+    await step(ctx, { type: 'user_text', text: 'стрижка' }, NOW);
+    await step(ctx, { type: 'user_text', text: 'завтра' }, NOW);
+    ctx.slots.masterId = 1;
+
+    findSlotsMock.mockResolvedValueOnce([]);
+    nearestSlotsMock.mockResolvedValueOnce([
+      {
+        date: '2026-10-21',
+        slots: [
+          { time: '17:00', masterId: 1, masterName: 'Артём' },
+          { time: '17:00', masterId: 1, masterName: 'Артём' },
+          { time: '17:30', masterId: 1, masterName: 'Артём' },
+        ],
+      },
+    ]);
+
+    const res = await step(ctx, { type: 'user_text', text: 'после обеда' }, NOW);
+    expect(nearestSlotsMock).toHaveBeenCalledWith('haircut', '2026-10-21', NOW, 7, 3, {
+      masterId: 1,
+      range: { from: '13:00', to: '17:00' },
+      uniqueTimes: true,
+    });
+    expect(res.say.join(' ')).toContain('17:00, 17:30');
+    expect(res.say.join(' ')).not.toContain('17:00, 17:00');
+  });
+
   it('«13 диана» в списке окон — это время и мастер, а не 13-е число', async () => {
     const { ctx } = await play(['хочу записаться', 'стрижка', 'давай на после завтра после обеда']);
     expect(ctx.state).toBe('OFFER_SLOTS');

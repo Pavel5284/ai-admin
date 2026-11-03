@@ -138,6 +138,25 @@ describe('живая вводная фраза', () => {
     expect(out).toEqual([core]);
     expect(stats.styleFallbacks).toBe(1);
   });
+
+  it('не добавляет вводную фразу к списку окон', async () => {
+    const ctx = baseCtx();
+    ctx.state = 'OFFER_SLOTS';
+    ctx.lastAsked = 'OFFER_SLOTS';
+    const core = 'Свободное время завтра: 1) 17:00 — Артём, 2) 17:30 — Руслан. Какое выбираете?';
+    const out = await humanize({ ctx, userText: 'завтра', say: [core] });
+    expect(out).toEqual([core]);
+    expect(completeMock).not.toHaveBeenCalled();
+  });
+
+  it('не добавляет вводную фразу к списку ближайших дней', async () => {
+    const ctx = baseCtx();
+    ctx.state = 'ASK_DATE';
+    const core = 'В этот день свободных окон нет. Ближайшие окна: завтра — 17:00, 17:30. На какой день вам удобно?';
+    const out = await humanize({ ctx, userText: 'сегодня', say: [core] });
+    expect(out).toEqual([core]);
+    expect(completeMock).not.toHaveBeenCalled();
+  });
 });
 
 describe('история после стилизации', () => {

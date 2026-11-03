@@ -35,6 +35,9 @@ const SYSTEM = [
 const SERVICE_WORDS = /(стриж|бород|брить|укладк|комплекс|детск)/iu;
 const PROMISES = /(скидк|бесплат|гарантир|свободн\p{L}*\s+окн|записал\s+вас|забронировал|точно\s+свобод|дешевл|цен[аы]|стоимост|руб|₽|адрес)/iu;
 const FAREWELL = /(до\s+встречи|до\s+свидания|всего\s+доброго|прощайте|до\s+скорой)/iu;
+// Списки окон и записей — это действие, а не светская беседа. Вводная фраза
+// перед ними только отодвигает выбор, поэтому стиль к таким ответам не применяем.
+const LIST_REPLY = /(^|\s)\d\)|Ближайшие окна|Свободное время|Ближайшее свободное время|Нашёл несколько записей/iu;
 
 function temperature(): number {
   const n = Number(process.env.LLM_STYLE_TEMPERATURE ?? 0.7);
@@ -116,6 +119,7 @@ function prompt(userText: string, core: string, ctx: Ctx): string {
 /** Ответ, который уже написан моделью или требует серьёзного тона, не трогаем. */
 function protectedReply(core: string, ctx: Ctx): boolean {
   if (ctx.state === 'HANDOFF' || ctx.outcome === 'handoff' || ctx.outcome === 'faq_declined') return true;
+  if (ctx.state === 'OFFER_SLOTS' || LIST_REPLY.test(core)) return true;
   return /^(Здравствуйте|Передаю вас|Уточню у администратора)/i.test(core);
 }
 
