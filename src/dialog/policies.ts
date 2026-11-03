@@ -148,6 +148,11 @@ export function onSilence(ctx: Ctx, _ev: BotEvent): StepResult {
     return { ctx, say: [last && last.text.length <= 120 ? last.text : R.silence[1]], actions: [] };
   }
   ctx.outcome = 'abandoned';
+  // Закрываем сессию, а не просто помечаем исход: иначе silence-worker будет
+  // повторять «Вы здесь?» каждые 15 минут, а вернувшийся клиент попадёт
+  // в брошенный диалог вместо нового. Следующая реплика начнёт всё с начала.
+  ctx.state = 'DONE';
+  ctx.lastAsked = 'DONE';
   return { ctx, say: [R.silence[2]], actions: [] };
 }
 

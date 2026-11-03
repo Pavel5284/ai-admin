@@ -1,6 +1,7 @@
 import { it, expect, describe, beforeAll, beforeEach, vi } from 'vitest';
 import { step } from '../../src/dialog/machine';
 import { newCtx } from '../../src/dialog/states';
+import { isSessionExpired } from '../../src/services/sessions';
 import { FIXTURE_SLOTS, useFixtureCatalog } from './fixtures';
 
 // Слоты считает БД, а юнит-тесты не должны зависеть от живой базы.
@@ -85,7 +86,24 @@ describe('нештатные ситуации', () => {
     expect(said[0]).toContain('Вы здесь');
     expect(said[2]).toContain('завершаю разговор');
     expect(ctx.outcome).toBe('abandoned');
+    expect(ctx.state).toBe('DONE');          // сессия закрыта: следующая реплика начнёт заново
     expect(ctx.slots.service).toBe('haircut');
+  });
+
+  it('вернулся после долгой паузы — сессия устарела, диалог начнётся заново', () => {
+    delete process.env.SESSION_TTL_MIN;
+    const ctx = newCtx('test:ttl', NOW);
+    ctx.state = 'ASK_DATE';
+    ctx.slots.service = 'haircut';
+
+    // Через полчаса ещё продолжаем начатую запись.
+    expect(isSessionExpired(ctx, new Date(NOW.getTime() + 30 * 60_000))).toBe(false);
+    // Через неделю старые слоты неактуальны.
+    expect(isSessionExpired(ctx, new Date(NOW.getTime() + 7 * 86400_000))).toBe(true);
+
+    // Завершённую сессию не считаем устаревшей: она и так начнётся заново.
+    ctx.state = 'DONE';
+    expect(isSessionExpired(ctx, new Date(NOW.getTime() + 7 * 86400_000))).toBe(false);
   });
 
   it('перебил: реплика разбирается как обычный ввод', async () => {

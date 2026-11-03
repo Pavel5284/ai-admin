@@ -2,7 +2,7 @@ import 'dotenv/config';
 import { step } from './dialog/machine';
 import { humanize, replaceLastBotTurns } from './dialog/humanize';
 import { newCtx, telegramIdFromSession, type BotEvent } from './dialog/states';
-import { loadCtx, saveCtx, logTurn } from './services/sessions';
+import { loadCtx, saveCtx, logTurn, deleteSession, isSessionExpired } from './services/sessions';
 import { executeActions } from './services/actions';
 import { loadCatalog } from './services/slots';
 
@@ -30,6 +30,17 @@ export function handleEvent(sessionId: string, ev: BotEvent, now = new Date()): 
     const t0 = Date.now();
     await ensureCatalog();
     let ctx = await loadCtx(sessionId);
+    // Клиент вернулся после долгой паузы — старый диалог уже неактуален:
+    // начинаем с приветствия, а не продолжаем брошенную запись недельной давности.
+    // Молчащую сессию не будим: удаляем, чтобы silence-worker не слал «Вы здесь?».
+    if (ctx && isSessionExpired(ctx, now)) {
+      if (ev.type === 'silence') {
+        await deleteSession(sessionId);
+        return [];
+      }
+      console.log('сессия устарела, начинаем диалог заново:', sessionId);
+      ctx = null;
+    }
     if (!ctx || ctx.state === 'DONE') ctx = newCtx(sessionId, now);   // завершённый диалог: начинаем новый
     // Старые сессии сохранили ctx без telegramId: восстанавливаем из session_id.
     if (ctx.telegramId == null) {
