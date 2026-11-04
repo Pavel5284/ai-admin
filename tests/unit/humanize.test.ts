@@ -157,6 +157,16 @@ describe('живая вводная фраза', () => {
     expect(out).toEqual([core]);
     expect(completeMock).not.toHaveBeenCalled();
   });
+
+  it('не добавляет вводную фразу к вопросу об имени', async () => {
+    const ctx = baseCtx();
+    ctx.state = 'ASK_NAME';
+    ctx.lastAsked = 'ASK_NAME';
+    const core = 'Спасибо! Записываю: Мужская стрижка, завтра, 18:00. Как вас зовут?';
+    const out = await humanize({ ctx, userText: '+79161234567', say: [core] });
+    expect(out).toEqual([core]);
+    expect(completeMock).not.toHaveBeenCalled();
+  });
 });
 
 describe('история после стилизации', () => {

@@ -95,6 +95,33 @@ describe('основной диалог', () => {
     expect(ctx.state).toBe('DONE');
   });
 
+  it('после «да» называет дату и время записи', async () => {
+    const { ctx } = await play([
+      'хочу записаться', 'стрижка', 'завтра', 'в 18:00', '+79161234567', 'Иван',
+    ]);
+    const res = await step(ctx, { type: 'user_text', text: 'да' }, NOW);
+    const text = res.say.join(' ');
+    expect(text).toContain('Готово, вы записаны');
+    expect(text).toContain('Мужская стрижка');
+    expect(text).toContain('завтра');
+    expect(text).toContain('18:00');
+  });
+
+  it('после телефона напоминает, на что записывает', async () => {
+    const { ctx } = await play(['хочу записаться', 'стрижка', 'завтра', 'в 18:00']);
+    const res = await step(ctx, { type: 'user_text', text: '+79161234567' }, NOW);
+    expect(res.ctx.state).toBe('ASK_NAME');
+    expect(res.say.join(' ')).toContain('Записываю');
+    expect(res.say.join(' ')).toContain('18:00');
+  });
+
+  it('в номере из 10 цифр с семёркой подсказывает про недостающую цифру', async () => {
+    const { ctx } = await play(['хочу записаться', 'стрижка', 'завтра', 'в 18:00']);
+    const res = await step(ctx, { type: 'user_text', text: '7898797898' }, NOW);
+    expect(res.ctx.state).toBe('ASK_CONTACT');
+    expect(res.say.join(' ')).toContain('не хватает одной цифры');
+  });
+
   it('названный мастер сохраняется и зачитывается в подтверждении', async () => {
     const { ctx, said } = await play([
       'хочу записаться', 'к Артёму на стрижку завтра', 'в 18:00', '+79161234567', 'Иван',

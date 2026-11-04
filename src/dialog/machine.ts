@@ -161,7 +161,7 @@ async function advance(ctx: Ctx, now: Date): Promise<StepResult> {
   // Имя нужно для записи, но клиент может отказаться: «пропустить» запомним
   // и больше не переспрашиваем. При переносе имя уже есть в записи.
   if (ctx.pending !== 'reschedule' && !s.name && !ctx.nameSkipped) {
-    return goto(ctx, 'ASK_NAME', R.askName);
+    return goto(ctx, 'ASK_NAME', R.askNameWith(whatWhen(ctx, now)));
   }
   return confirmAsk(ctx, now);
 }
@@ -244,20 +244,33 @@ function askMaster(ctx: Ctx, text = ''): StepResult {
   return goto(ctx, 'ASK_MASTER', unknown ? R.masterUnknown(unknown, names) : R.askMasterOptions(names));
 }
 
-/** Подтверждение: услуга, дата словами, время, мастер, телефон, имя. */
-function confirmAsk(ctx: Ctx, now: Date): StepResult {
+/** «Мужская стрижка, сегодня, 17:00, мастер Артём» — что и когда. */
+function whatWhen(ctx: Ctx, now: Date): string {
   const s = ctx.slots;
-  ctx.state = 'CONFIRM';
-  ctx.lastAsked = 'CONFIRM';
   const master = s.masterId ? masterById(s.masterId)?.name : undefined;
-  const summary = [
+  return [
     serviceTitle(s.service) ?? 'услуга',
     s.date ? formatDate(s.date, now) : 'дата не выбрана',
     s.time ?? (s.timeRange ? `${s.timeRange.from}–${s.timeRange.to}` : 'время не выбрано'),
     master ? `мастер ${master}` : 'мастер на выбор',
+  ].join(', ');
+}
+
+/** Полная сводка записи — для подтверждения и финального сообщения. */
+function summaryOf(ctx: Ctx, now: Date): string {
+  const s = ctx.slots;
+  return [
+    whatWhen(ctx, now),
     s.phone ?? 'телефон не указан',
     ...(s.name ? [`имя ${s.name}`] : []),
   ].join(', ');
+}
+
+/** Подтверждение: услуга, дата словами, время, мастер, телефон, имя. */
+function confirmAsk(ctx: Ctx, now: Date): StepResult {
+  ctx.state = 'CONFIRM';
+  ctx.lastAsked = 'CONFIRM';
+  const summary = summaryOf(ctx, now);
   // При переносе мы не «записываем», а меняем время — формулировка другая.
   if (ctx.pending === 'reschedule') {
     return { ctx, say: [R.confirmReschedule(summary)], actions: [] };
@@ -688,7 +701,14 @@ const handlers: Record<StateId, Handler> = {
       return advance(ctx, now);
     }
     // Неполный или слишком длинный номер не копим: просим повторить целиком.
-    if (nlu.digits || nlu.phoneStatus) return say(ctx, R.phoneAgain);
+    if (nlu.digits || nlu.phoneStatus) {
+      const digits = nlu.digits ?? '';
+      // «7898797898» — 10 цифр с семёркой: почти наверняка забыта одна цифра.
+      if (nlu.phoneStatus === 'partial' && digits.length === 10 && digits[0] === '7') {
+        return say(ctx, R.phoneMissingDigit);
+      }
+      return say(ctx, R.phoneAgain);
+    }
     if (nlu.service || nlu.date || nlu.time) return goto(ctx, 'ASK_CONTACT', R.askPhone);
     return misunderstood(ctx, 'ASK_CONTACT');
   },
@@ -840,7 +860,7 @@ const handlers: Record<StateId, Handler> = {
       ctx.outcome = 'booked';
       const slots = { ...ctx.slots };
       const actions: Action[] = [{ type: 'create_booking', slots, telegramId: ctx.telegramId }];
-      return { ctx, say: pick(ctx, R.booked), actions };
+      return { ctx, say: [R.booked(summaryOf(ctx, now))], actions };
     }
 
     if (nlu.no) {

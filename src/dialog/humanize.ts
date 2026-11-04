@@ -10,7 +10,7 @@
 
 import { complete, stats } from '../services/llm';
 import { allMasters, allServices } from '../services/slots';
-import type { Ctx } from './states';
+import type { Ctx, StateId } from './states';
 
 type HumanizeOpts = {
   ctx: Ctx;
@@ -38,6 +38,10 @@ const FAREWELL = /(до\s+встречи|до\s+свидания|всего\s+д
 // Списки окон и записей — это действие, а не светская беседа. Вводная фраза
 // перед ними только отодвигает выбор, поэтому стиль к таким ответам не применяем.
 const LIST_REPLY = /(^|\s)\d\)|Ближайшие окна|Свободное время|Ближайшее свободное время|Нашёл несколько записей/iu;
+
+// Сбор данных и подтверждение — это действие, а не светская беседа:
+// «Привет, рад помочь. Как вас зовут?» сбивает клиента с толку.
+const TRANSACTIONAL_STATES: StateId[] = ['OFFER_SLOTS', 'ASK_CONTACT', 'ASK_NAME', 'CONFIRM', 'FIND_BOOKING'];
 
 function temperature(): number {
   const n = Number(process.env.LLM_STYLE_TEMPERATURE ?? 0.7);
@@ -119,7 +123,7 @@ function prompt(userText: string, core: string, ctx: Ctx): string {
 /** Ответ, который уже написан моделью или требует серьёзного тона, не трогаем. */
 function protectedReply(core: string, ctx: Ctx): boolean {
   if (ctx.state === 'HANDOFF' || ctx.outcome === 'handoff' || ctx.outcome === 'faq_declined') return true;
-  if (ctx.state === 'OFFER_SLOTS' || LIST_REPLY.test(core)) return true;
+  if (TRANSACTIONAL_STATES.includes(ctx.state) || LIST_REPLY.test(core)) return true;
   return /^(Здравствуйте|Передаю вас|Уточню у администратора)/i.test(core);
 }
 
