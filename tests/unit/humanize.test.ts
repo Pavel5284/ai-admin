@@ -167,6 +167,19 @@ describe('живая вводная фраза', () => {
     expect(out).toEqual([core]);
     expect(completeMock).not.toHaveBeenCalled();
   });
+
+  it.each(['ASK_SERVICE', 'ASK_MASTER', 'ASK_DATE', 'ASK_TIME'] as const)(
+    'не добавляет вводную фразу в состоянии %s',
+    async (state) => {
+      const ctx = baseCtx();
+      ctx.state = state;
+      ctx.lastAsked = state;
+      const core = 'На какой день вас записать?';
+      const out = await humanize({ ctx, userText: 'завтра', say: [core] });
+      expect(out).toEqual([core]);
+      expect(completeMock).not.toHaveBeenCalled();
+    },
+  );
 });
 
 describe('история после стилизации', () => {

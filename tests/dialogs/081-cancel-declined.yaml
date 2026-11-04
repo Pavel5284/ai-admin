@@ -9,7 +9,7 @@ turns:
   - user: +7 916 000-00-02
     expect: { state: CONFIRM }
   - user: нет
-    expect: { state: ASK_SERVICE }
+    expect: { state: INTENT }
 final:
   booking: none
   existing: { phone: '+79160000002', status: confirmed, date: '2026-10-16', time: '14:00' }

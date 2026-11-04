@@ -106,6 +106,16 @@ const NEAREST_RE = /(ближайш\p{L}*|как\s+можно\s+(?:скорее|
 /** Клиент задал вопрос — возможно, вместе с просьбой записаться. */
 export const hasFaqQuestion = (text: string): boolean => FAQ_RE.test(text);
 
+/** Вопросительная реплика: «?» или вопросительное начало фразы. */
+export const isQuestion = (text: string): boolean => QUESTION_RE.test(text);
+
+/**
+ * Согласие/отказ целой фразой. Не «да, но…»: такое подтверждением не считаем.
+ * Нормализация убирает запятые, поэтому «да, всё верно» приходит как «да все верно».
+ */
+const YES_RE = /^(?:да|да\s+(?:да|все\s+верно|верно|конечно|подтверждаю|ага)|ага|угу|ок|окей|хорошо|верно|все\s+верно|подтверждаю|давай|конечно|разумеется|согласен|согласна|yes)$/u;
+const NO_RE = /^(?:нет|неа|не|no|nope|не\s+хочу|не\s+надо|не\s+верно|нет\s+не\s+верно|не\s+согласен|не\s+согласна)$/u;
+
 const detectIntent = (text: string, raw = ''): NluIntent => {
   if (/(оператор|администратор|человек|менеджер|живого|живой|жалоб)/.test(text)) return 'handoff';
 
@@ -130,8 +140,8 @@ export async function understand(ctx: Ctx, text: string, now: Date): Promise<Nlu
   const t = norm(text);
   const nlu: Nlu = { intent: 'unknown', text: t };
 
-  if (YES.has(t)) nlu.yes = true;
-  if (NO.has(t)) nlu.no = true;
+  if (YES.has(t) || YES_RE.test(t)) nlu.yes = true;
+  if (NO.has(t) || NO_RE.test(t)) nlu.no = true;
 
   const service = matchService(t);
   if (service) nlu.service = service;
@@ -167,11 +177,13 @@ export async function understand(ctx: Ctx, text: string, now: Date): Promise<Nlu
     nlu.phoneStatus = phone.status;
   }
 
-  const name = t.match(/(?:меня\s+зовут|зовут|мое имя|моё имя|имя)\s+([а-яё]{2,})/);
+  // Имя берём из исходной реплики, а не из нормализованной: иначе «Пётр»
+  // превращается в «Петр» — нормализация специально убирает ё для разбора.
+  const name = text.match(/(?:меня\s+зовут|зовут|мо[её]\s+имя|имя)\s+([а-яё]{2,})/iu);
   if (name) nlu.name = capitalizeName(name[1]!);
   // На вопрос «Как вас зовут?» часто отвечают просто именем: «Иван».
   if (!nlu.name && ctx.lastAsked === 'ASK_NAME') {
-    const bare = looksLikeName(t);
+    const bare = looksLikeName(text.trim());
     if (bare) nlu.name = bare;
   }
 

@@ -23,7 +23,7 @@ turns:
       JOIN master_services ms ON ms.master_id = m.id
       JOIN services s ON s.id = ms.service_id AND s.code = 'kids';
     user: да
-    expect: { state: OFFER_SLOTS, say_contains: 'заняли' }
+    expect: { state: OFFER_SLOTS, say_contains: 'заняли', say_not_contains: 'Готово' }
   - user: тогда в 14:00
     expect: { state: CONFIRM, slots: { time: '14:00' } }
   - user: да

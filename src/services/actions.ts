@@ -3,12 +3,21 @@ import { cancelBooking, createBooking, rescheduleBooking } from './slots';
 import { createLead, createTask } from './crm';
 import type { Ctx, Action } from '../dialog/states';
 
-export async function executeActions(ctx: Ctx, actions: Action[]): Promise<string[]> {
+export type ActionReport = {
+  /** Дополнительные реплики после действия: ошибки или уточнения. */
+  extra: string[];
+  /** Хотя бы одно действие не выполнилось — успешную реплику показывать нельзя. */
+  failed: boolean;
+};
+
+export async function executeActions(ctx: Ctx, actions: Action[]): Promise<ActionReport> {
   const extra: string[] = [];
+  let failed = false;
   for (const a of actions) {
     if (a.type === 'create_booking') {
       const r = await createBooking(a.slots, a.telegramId);  // { ok: true, id } или { ok: false, reason }
       if (!r.ok) {
+        failed = true;
         extra.push('К сожалению, это время только что заняли. Давайте выберем другое.');
         ctx.state = 'OFFER_SLOTS';
         // Запись не создана — «booked» здесь был бы ложью и испортил бы метрику.
@@ -25,12 +34,16 @@ export async function executeActions(ctx: Ctx, actions: Action[]): Promise<strin
     }
     if (a.type === 'cancel_booking') {
       const done = await cancelBooking(a.id, a.telegramId);
-      if (!done) extra.push('Не удалось отменить запись. Позвоните администратору.');
+      if (!done) {
+        failed = true;
+        extra.push('Не удалось отменить запись. Позвоните администратору.');
+      }
     }
     if (a.type === 'reschedule_booking') {
       const service = await serviceDuration(ctx.slots.service);
       const r = await rescheduleBooking(a.id, a.date, a.time, service, a.telegramId);
       if (!r.ok) {
+        failed = true;
         extra.push(r.reason === 'slot_taken'
           ? 'Это время только что заняли. Давайте выберем другое.'
           : 'Не удалось перенести запись. Позвоните администратору.');
@@ -48,6 +61,7 @@ export async function executeActions(ctx: Ctx, actions: Action[]): Promise<strin
         // Перенос удался: старую запись больше не держим в контексте.
         delete ctx.pending;
         delete ctx.bookingId;
+        delete ctx.activeBooking;
       }
     }
     if (a.type === 'handoff') {
@@ -66,7 +80,7 @@ export async function executeActions(ctx: Ctx, actions: Action[]): Promise<strin
       }
     }
   }
-  return extra;
+  return { extra, failed };
 }
 
 /** Длительность услуги — нужна, чтобы посчитать конец перенесённой записи. */

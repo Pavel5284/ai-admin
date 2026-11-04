@@ -1,6 +1,7 @@
 import type { BotEvent, Ctx, StateId, StepResult } from './states';
-import { R, variant } from './replies';
+import { R, bookingSummary, variant } from './replies';
 import { normalize } from '../nlu/normalize';
+import { hasFaqQuestion, isQuestion } from '../nlu/intent';
 
 /**
  * Политики диалога: переходы, ответы, глобальные перехваты,
@@ -46,6 +47,7 @@ export function handoff(
   delete ctx.pending;
   delete ctx.bookingId;
   delete ctx.bookings;
+  delete ctx.activeBooking;
   delete ctx.nearest;
   delete ctx.wantsNearest;
   ctx.retries.HANDOFF = 0;
@@ -113,10 +115,16 @@ export function checkGlobalIntents(ctx: Ctx, ev: BotEvent): StepResult | null {
     return handoff(ctx, 'client_complaint', R.complaint);
   }
 
-  // «повторите» → повтор последней реплики бота
+  // «повторите» → повтор последней реплики бота. Если бот ещё ничего не
+  // говорил, повторять нечего: здороваемся и спрашиваем, что нужно.
   if (/(повтори|ещё раз|еще раз|что вы сказали|не расслышал)/.test(t)) {
     const last = [...ctx.history].reverse().find((h) => h.role === 'bot');
-    return { ctx, say: last ? [last.text] : [], actions: [] };
+    if (last) return { ctx, say: [last.text], actions: [] };
+    if (ctx.state === 'START') {
+      const res = goto(ctx, 'INTENT', R.askIntent);
+      return { ctx, say: [...pick(ctx, R.greet), ...res.say], actions: [] };
+    }
+    return say(ctx, R.askIntent);
   }
 
   // «назад» → предыдущий слот
@@ -125,16 +133,69 @@ export function checkGlobalIntents(ctx: Ctx, ev: BotEvent): StepResult | null {
   }
 
   // «отмена», «стоп», «не надо» → подтверждение отмены.
-  // «отмени запись» — это не прерывание, а отдельный сценарий (перенос/отмена), его ловит интент.
-  // В HANDOFF «не надо» — отказ оставлять телефон, а не отмена записи.
-  if (ctx.state !== 'HANDOFF' && /(стоп|не надо|хватит|отмен)/.test(t) && !/запис/.test(t)) {
-    ctx.pending = 'cancel';
-    ctx.state = 'CONFIRM';
-    ctx.lastAsked = 'CONFIRM';
+  // «За сколько часов можно отменить?» — вопрос о правилах, а не команда.
+  const stop = /(стоп|хватит|отмен)/.test(t);
+  const notNow = /не\s+надо/.test(t);
+  if (!stop && !notNow) return null;
+
+  // Императив «отмените» с вопросительным знаком командой быть не перестаёт.
+  const cancelQuestion = hasFaqQuestion(t) && isQuestion(t)
+    && !/^\s*(?:а\s+)?отмен(?:и|ите|ить|а|у)?(?:\s+пожалуйста)?\s*\??$/u.test(t);
+  if (cancelQuestion) return null;
+
+  // «Не надо» в этих вопросах — ответ по смыслу, а не отмена записи.
+  if (notNow && (ctx.state === 'ASK_NAME' || ctx.state === 'ASK_MASTER')) return null;
+
+  // В HANDOFF «не надо» — отказ оставлять телефон.
+  if (ctx.state === 'HANDOFF') return null;
+
+  // Явная просьба отменить запись в начале диалога — это отдельный сценарий
+  // (найти запись по аккаунту), а не глобальный перехват.
+  const explicitCancel = /отмен/.test(t);
+  const wantsCancelBooking = explicitCancel && /запис/.test(t);
+  if (explicitCancel
+    && (ctx.state === 'START' || ctx.state === 'INTENT' || ctx.state === 'FAQ'
+      || ctx.state === 'RESUME' || ctx.state === 'DONE')) {
+    return null;
+  }
+
+  // Пока запись ещё ищем, отменять нечего: пусть FIND_BOOKING разберётся.
+  if (ctx.state === 'FIND_BOOKING' && !ctx.bookingId && !ctx.activeBooking) {
+    if (explicitCancel) return null;
+    // «стоп» в поиске записи — прекращаем поиск, а не подтверждаем отмену.
+    ctx.pending = undefined;
+    ctx.bookings = undefined;
+    return goto(ctx, 'INTENT', R.askIntent);
+  }
+
+  // Уже подтверждаем отмену: повторяем вопрос, не сбрасывая найденную запись.
+  if (ctx.pending === 'cancel') {
     return { ctx, say: pick(ctx, R.cancelAsk), actions: [] };
   }
 
-  return null;
+  // Клиент явно просит отменить найденную запись — даже если сейчас перенос.
+  if (wantsCancelBooking && ctx.activeBooking) {
+    ctx.pending = 'cancel';
+    ctx.state = 'CONFIRM';
+    ctx.lastAsked = 'CONFIRM';
+    return { ctx, say: [R.cancelBooking(bookingSummary(ctx.activeBooking))], actions: [] };
+  }
+
+  // Перенос: «стоп» прекращает перенос, но не отменяет саму запись.
+  if (ctx.pending === 'reschedule') {
+    ctx.abortState = ctx.state;
+    ctx.pending = 'cancel_reschedule';
+    ctx.state = 'CONFIRM';
+    ctx.lastAsked = 'CONFIRM';
+    return { ctx, say: pick(ctx, R.cancelRescheduleAsk), actions: [] };
+  }
+
+  // Обычная запись или пустой диалог: подтверждение отмены.
+  ctx.abortState = ctx.state;
+  ctx.pending = 'cancel';
+  ctx.state = 'CONFIRM';
+  ctx.lastAsked = 'CONFIRM';
+  return { ctx, say: pick(ctx, R.cancelAsk), actions: [] };
 }
 
 /** Клиент молчит: 1 — напомнить, 2 — повторить вопрос короче, 3 — вежливо закрыть, слоты сохранить. */

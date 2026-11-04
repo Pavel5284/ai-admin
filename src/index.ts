@@ -61,10 +61,12 @@ export function handleEvent(sessionId: string, ev: BotEvent, now = new Date()): 
     if (styled.length === result.say.length && styled.some((s, i) => s !== result.say[i])) {
       replaceLastBotTurns(result.ctx, result.say, styled);
     }
-    const extra = await executeActions(result.ctx, result.actions);
+    const report = await executeActions(result.ctx, result.actions);
     await saveCtx(result.ctx);
 
-    const say = [...styled, ...extra];
+    // Если действие не выполнилось, «Готово, вы записаны» — ложь: показываем
+    // только сообщение об ошибке и следующий шаг.
+    const say = [...(report.failed ? [] : styled), ...report.extra];
     await logTurn({
       sessionId, stateFrom: from, stateTo: result.ctx.state,
       userText: ev.type === 'user_text' ? ev.text : '[' + ev.type + ']',

@@ -41,7 +41,10 @@ const LIST_REPLY = /(^|\s)\d\)|Ближайшие окна|Свободное в
 
 // Сбор данных и подтверждение — это действие, а не светская беседа:
 // «Привет, рад помочь. Как вас зовут?» сбивает клиента с толку.
-const TRANSACTIONAL_STATES: StateId[] = ['OFFER_SLOTS', 'ASK_CONTACT', 'ASK_NAME', 'CONFIRM', 'FIND_BOOKING'];
+const TRANSACTIONAL_STATES: StateId[] = [
+  'ASK_SERVICE', 'ASK_MASTER', 'ASK_DATE', 'ASK_TIME',
+  'OFFER_SLOTS', 'ASK_CONTACT', 'ASK_NAME', 'CONFIRM', 'FIND_BOOKING',
+];
 
 function temperature(): number {
   const n = Number(process.env.LLM_STYLE_TEMPERATURE ?? 0.7);

@@ -2,7 +2,7 @@ import type {
   Action, BotEvent, BookingRef, Ctx, NearestOption, StateId, StepResult,
 } from './states';
 import { newCtx } from './states';
-import { R } from './replies';
+import { R, bookingSummary } from './replies';
 import {
   checkGlobalIntents, goto, handoff, misunderstood, onBargeIn, onSilence, pick, say,
 } from './policies';
@@ -131,7 +131,12 @@ function absorb(ctx: Ctx, nlu: Nlu): void {
       delete s.time;
     }
     // Мастер — тоже слот: «к Артёму» можно сказать в любой момент диалога.
-    if (/(любому|любой|неважно|все равно|кто свободен)/.test(nlu.text)) delete s.masterId;
+    // «Любой» в вопросе о времени не должен сбрасывать уже выбранного мастера:
+    // там это про время, а не про мастера.
+    const anyMaster = /(любому|любой|любая|любого|любую|любое|неважно|все равно|кто свободен|кто угодно|без разницы)/.test(nlu.text)
+      && (ctx.state === 'ASK_MASTER'
+        || /(мастер|специалист|барбер|к\s+люб)/.test(nlu.text));
+    if (anyMaster) delete s.masterId;
     else {
       const master = matchMaster(nlu.text);
       if (master) s.masterId = master.id;
@@ -164,6 +169,21 @@ async function advance(ctx: Ctx, now: Date): Promise<StepResult> {
     return goto(ctx, 'ASK_NAME', R.askNameWith(whatWhen(ctx, now)));
   }
   return confirmAsk(ctx, now);
+}
+
+/**
+ * `advance`, но перед подтверждением проверяет, что уже выбранное время
+ * всё ещё свободно. Нужен после смены услуги, даты или мастера: иначе бот
+ * подтвердит окно, которого на новом дне/у нового мастера нет.
+ */
+async function advanceChecked(ctx: Ctx, now: Date): Promise<StepResult> {
+  const s = ctx.slots;
+  if (s.time && s.date) {
+    const free = await findSlots(s.service, s.date, now, { masterId: s.masterId });
+    if (!free.length) return offerOtherDays(ctx, now);
+    if (!free.some((f) => f.time === s.time)) return offerSlots(ctx, free, now);
+  }
+  return advance(ctx, now);
 }
 
 /** Последний вопрос бота: его повторяем после светской реплики. */
@@ -208,7 +228,7 @@ async function smalltalkTurn(ctx: Ctx, nlu: Nlu, now: Date): Promise<StepResult>
         if (ctx.slots.name || ctx.nameSkipped) return (await advance(ctx, now)).say;
         return pick(ctx, R.askName);
       case 'OFFER_SLOTS':
-        return [lastQuestion(ctx) ?? pick(ctx, R.askWhichSlot)[0]!];
+        return askAgain(ctx, 'OFFER_SLOTS').say;
       case 'CONFIRM':
         return [lastQuestion(ctx) ?? pick(ctx, R.rephrase.CONFIRM ?? R.generic)[0]!];
       case 'FIND_BOOKING':
@@ -279,6 +299,43 @@ function confirmAsk(ctx: Ctx, now: Date): StepResult {
   return { ctx, say: [R.confirm(summary)], actions: [] };
 }
 
+/**
+ * Поправить слоты прямо в подтверждении: «нет, лучше завтра в 19:00»,
+ * «а можно к Руслану», «телефон 8 916…». Возвращает true, если что-то
+ * изменилось — тогда вызывающий заново проверяет окно и подтверждает.
+ */
+function applyCorrections(ctx: Ctx, nlu: Nlu): boolean {
+  const s = ctx.slots;
+  let changed = false;
+  if (nlu.service) {
+    s.service = nlu.service;
+    changed = true;
+  }
+  if (nlu.date) {
+    s.date = nlu.date;
+    changed = true;
+  }
+  if (nlu.time) {
+    s.time = nlu.time;
+    delete s.timeRange;
+    changed = true;
+  } else if (nlu.timeRange) {
+    s.timeRange = nlu.timeRange;
+    delete s.time;
+    changed = true;
+  }
+  if (nlu.phone) {
+    s.phone = nlu.phone;
+    changed = true;
+  }
+  if (nlu.name) {
+    s.name = nlu.name;
+    delete ctx.nameSkipped;
+    changed = true;
+  }
+  return changed;
+}
+
 /** Показать свободные окна и войти в OFFER_SLOTS. Показываем не больше трёх. */
 function offerSlots(ctx: Ctx, free: FreeSlot[], now: Date, prefix?: string): StepResult {
   delete ctx.nearest;
@@ -319,16 +376,32 @@ async function offerNearest(ctx: Ctx, now: Date): Promise<StepResult> {
 }
 
 /** «Любое», «без разницы», «как удобнее» — выбрать ближайший вариант из списка. */
-const ANY_CHOICE_RE = /(?:люб\p{L}*|вс[её]\s*равно|без\s*разниц\p{L}*|не\s*важно|неважно|на\s+(?:ваш|твой)\s+выбор|как\s+удобн\p{L}*|что\s+удобн\p{L}*|хоть\s+что|перв\p{L}*\s+вариант)/u;
+const ANY_CHOICE_RE = /(?:любой|любая|любое|любые|любого|любому|любую|любым|любом|любых|любыми|вс[её]\s*равно|без\s*разниц\p{L}*|не\s*важно|неважно|на\s+(?:ваш|твой)\s+выбор|как\s+удобн\p{L}*|что\s+удобн\p{L}*|хоть\s+что|перв\p{L}*\s+вариант)/u;
+
+/**
+ * Номер варианта в любом роде и падеже: «первый», «первую», «первое»,
+ * «второй вариант». Список окон и список записей используют один и тот же
+ * разбор, чтобы «первую» работало и там, и там.
+ */
+const CHOICE_INDEX: Record<string, number> = {
+  '1': 0, '2': 1, '3': 2,
+  'один': 0, 'два': 1, 'три': 2,
+  'первый': 0, 'первая': 0, 'первое': 0, 'первую': 0,
+  'второй': 1, 'вторая': 1, 'второе': 1, 'вторую': 1,
+  'третий': 2, 'третья': 2, 'третье': 2, 'третью': 2,
+};
+
+function choiceIndex(text: string): number | undefined {
+  const t = text.trim()
+    .replace(/^вариант\s+/u, '')
+    .replace(/\s+вариант$/u, '');
+  return CHOICE_INDEX[t];
+}
 
 /** Выбор варианта из списка ближайших окон: номер, время или «любой». */
 function pickNearest(nlu: Nlu, options: NearestOption[]): NearestOption | undefined {
-  const index: Record<string, number> = {
-    '1': 0, '2': 1, '3': 2, 'один': 0, 'два': 1, 'три': 2,
-    'первый': 0, 'второй': 1, 'третий': 2,
-    'первая': 0, 'вторая': 1, 'третья': 2,
-  };
-  if (nlu.text in index) return options[index[nlu.text]];
+  const index = choiceIndex(nlu.text);
+  if (index != null) return options[index];
   if (nlu.date && nlu.time) {
     return options.find((o) => o.date === nlu.date && o.time === nlu.time);
   }
@@ -339,11 +412,8 @@ function pickNearest(nlu: Nlu, options: NearestOption[]): NearestOption | undefi
 
 /** Выбор одного из предложенных окон. */
 function pickSlot(nlu: Nlu, free: FreeSlot[]): FreeSlot | undefined {
-  const index: Record<string, number> = {
-    '1': 0, '2': 1, '3': 2, 'один': 0, 'два': 1, 'три': 2,
-    'первый': 0, 'второй': 1, 'третий': 2,
-  };
-  if (nlu.text in index) return free[index[nlu.text]];
+  const index = choiceIndex(nlu.text);
+  if (index != null) return free[index];
   if (nlu.time) {
     const found = free.find((s) => s.time === nlu.time);
     if (found) return found;
@@ -358,11 +428,8 @@ function pickBooking<T extends { id: number; time: string }>(
   nlu: Nlu,
   bookings: T[],
 ): T | undefined {
-  const index: Record<string, number> = {
-    '1': 0, '2': 1, '3': 2, 'один': 0, 'два': 1, 'три': 2,
-    'первая': 0, 'вторая': 1, 'третья': 2, 'первый': 0, 'второй': 1, 'третий': 2,
-  };
-  if (nlu.text in index) return bookings[index[nlu.text]];
+  const index = choiceIndex(nlu.text);
+  if (index != null) return bookings[index];
   if (nlu.time) {
     const byTime = bookings.find((b) => b.time === nlu.time);
     if (byTime) return byTime;
@@ -372,6 +439,7 @@ function pickBooking<T extends { id: number; time: string }>(
 
 /** Запись найдена: дальше — отмена или перенос. */
 function afterBookingFound(ctx: Ctx, booking: BookingRef): StepResult {
+  ctx.activeBooking = booking;
   if (ctx.pending === 'reschedule') {
     // Перенос: та же услуга и мастер, новая дата и время.
     ctx.slots.service = booking.serviceCode;
@@ -388,8 +456,7 @@ function afterBookingFound(ctx: Ctx, booking: BookingRef): StepResult {
   // Отмена: показываем, что именно отменяем, и просим подтвердить.
   ctx.state = 'CONFIRM';
   ctx.lastAsked = 'CONFIRM';
-  const summary = `${booking.serviceTitle}, ${booking.date} ${booking.time}, мастер ${booking.masterName}`;
-  return { ctx, say: [R.cancelBooking(summary)], actions: [] };
+  return { ctx, say: [R.cancelBooking(bookingSummary(booking))], actions: [] };
 }
 
 /** Показать найденные записи или сразу перейти к выбранной. */
@@ -442,6 +509,8 @@ function clearBookingSlots(ctx: Ctx): void {
   delete ctx.slots.timeRange;
   delete ctx.nearest;
   delete ctx.wantsNearest;
+  delete ctx.bookingId;
+  delete ctx.activeBooking;
 }
 
 /**
@@ -583,7 +652,7 @@ const handlers: Record<StateId, Handler> = {
   ASK_MASTER: async (ctx, nlu, now) => {
     absorb(ctx, nlu);              // названного мастера absorb уже записал
     // «Любой», «неважно», «нет» — мастер не нужен, идём дальше.
-    if (nlu.no || /(любой|любая|любого|любому|любую|неважно|все равно|кто свободен|кто угодно|без разницы)/.test(nlu.text)) {
+    if (nlu.no || /(любой|любая|любого|любому|любую|любое|неважно|все равно|кто свободен|кто угодно|без разницы|не надо)/.test(nlu.text)) {
       delete ctx.slots.masterId;
       ctx.retries.ASK_MASTER = 0;
       if (nlu.nearest || ctx.wantsNearest) return offerNearest(ctx, now);
@@ -609,8 +678,9 @@ const handlers: Record<StateId, Handler> = {
 
   ASK_DATE: async (ctx, nlu, now) => {
     absorb(ctx, nlu);
-    // «Когда есть ближайшее?» — показываем окна, а не переспрашиваем дату.
-    if (nlu.nearest && !nlu.time) {
+    // «Когда есть ближайшее?», «любой», «без разницы» — показываем окна,
+    // а не переспрашиваем дату.
+    if ((nlu.nearest || ANY_CHOICE_RE.test(nlu.text)) && !nlu.time) {
       ctx.retries.ASK_DATE = 0;
       return offerNearest(ctx, now);
     }
@@ -625,7 +695,7 @@ const handlers: Record<StateId, Handler> = {
 
   ASK_TIME: async (ctx, nlu, now) => {
     absorb(ctx, nlu);
-    if (nlu.nearest && !nlu.time) {
+    if ((nlu.nearest || ANY_CHOICE_RE.test(nlu.text)) && !nlu.time && !nlu.timeRange) {
       ctx.retries.ASK_TIME = 0;
       return offerNearest(ctx, now);
     }
@@ -634,28 +704,22 @@ const handlers: Record<StateId, Handler> = {
       return misunderstood(ctx, 'ASK_TIME');
     }
     ctx.retries.ASK_TIME = 0;
-
-    // Время-диапазон («после обеда»): ищем окна внутри диапазона.
-    if (!ctx.slots.time && ctx.slots.timeRange) {
-      const inRange = await findSlots(ctx.slots.service, ctx.slots.date, now, {
-        range: ctx.slots.timeRange, masterId: ctx.slots.masterId,
-      });
-      if (inRange.length) return offerSlots(ctx, inRange, now);
-      return offerOtherDays(ctx, now);
-    }
-
-    const free = await findSlots(ctx.slots.service, ctx.slots.date, now, {
-      masterId: ctx.slots.masterId,
-    });
-    if (!free.length) return offerOtherDays(ctx, now);
-    if (ctx.slots.time && !free.some((f) => f.time === ctx.slots.time)) {
-      return offerSlots(ctx, free, now);   // это время занято — показываем свободные
-    }
-    return advance(ctx, now);
+    return advanceChecked(ctx, now);
   },
 
   OFFER_SLOTS: async (ctx, nlu, now) => {
     absorb(ctx, nlu);
+
+    // Непонятный ответ: сначала переспрашиваем, потом предлагаем другие дни,
+    // и только затем передаём администратору. Иначе список повторяется вечно.
+    const retry = async (): Promise<StepResult> => {
+      const n = (ctx.retries.OFFER_SLOTS ?? 0) + 1;
+      ctx.retries.OFFER_SLOTS = n;
+      if (n === 1) return say(ctx, R.askWhichSlot);
+      if (n === 2) return offerOtherDays(ctx, now);
+      return handoff(ctx, 'no_understanding:OFFER_SLOTS');
+    };
+
     // Список «ближайшее время» может содержать разные дни, поэтому сначала
     // выбираем конкретную пару дата+время, а уже потом идём в обычный advance.
     if (ctx.nearest?.length) {
@@ -667,17 +731,27 @@ const handlers: Record<StateId, Handler> = {
         if (chosen.masterId && !ctx.slots.masterId) ctx.slots.masterId = chosen.masterId;
         delete ctx.nearest;
         ctx.retries.OFFER_SLOTS = 0;
+        // Список ближайших окон уже проверен nearestSlots; повторный findSlots
+        // здесь не нужен и может дать другую сетку у мока/кеша.
         return advance(ctx, now);
       }
-      if (nlu.nearest) return offerNearest(ctx, now);
+      if (nlu.nearest || ANY_CHOICE_RE.test(nlu.text)) return offerNearest(ctx, now);
       if (nlu.no) {
         delete ctx.nearest;
         return goto(ctx, 'ASK_DATE', R.askDate);
       }
-      // Клиент назвал день или время — переходим к обычному выбору в этот день.
-      if (nlu.date || nlu.time || nlu.timeRange) delete ctx.nearest;
-      else return say(ctx, R.askWhichSlot);
+      if (nlu.date) {
+        // Клиент назвал день — покажем окна именно на этот день.
+        delete ctx.nearest;
+      } else if (nlu.time || nlu.timeRange) {
+        // Время без дня в списке разных дней неоднозначно — уточняем день.
+        delete ctx.nearest;
+        return goto(ctx, 'ASK_DATE', R.askDate);
+      } else {
+        return retry();
+      }
     }
+
     const free = await findSlots(ctx.slots.service, ctx.slots.date, now, {
       range: ctx.slots.timeRange, masterId: ctx.slots.masterId,
     });
@@ -688,9 +762,18 @@ const handlers: Record<StateId, Handler> = {
       delete ctx.slots.timeRange;
       if (chosen.masterId && !ctx.slots.masterId) ctx.slots.masterId = chosen.masterId;
       ctx.retries.OFFER_SLOTS = 0;
-      return advance(ctx, now);
+      return advanceChecked(ctx, now);
     }
-    return offerSlots(ctx, free, now);
+    if (nlu.no) {
+      delete ctx.slots.time;
+      delete ctx.slots.timeRange;
+      return goto(ctx, 'ASK_DATE', R.askDate);
+    }
+    // Клиент назвал день, время, диапазон или услугу — показываем новый список.
+    if (nlu.date || nlu.time || nlu.timeRange || nlu.service) {
+      return offerSlots(ctx, free, now);
+    }
+    return retry();
   },
 
   ASK_CONTACT: async (ctx, nlu, now) => {
@@ -743,19 +826,16 @@ const handlers: Record<StateId, Handler> = {
     const wantsMaster = /(маст|специалист|барбер)/.test(nlu.text);
     const bareName = !ctx.slots.name && !nlu.yes && !nlu.no ? looksLikeName(nlu.text) : undefined;
 
-    // «что изменить» — клиент называет, какой слот поправить
+    // «что изменить» — клиент называет, какой слот поправить.
     if (ctx.pending === 'change') {
-      if (nlu.name) {
-        ctx.slots.name = nlu.name;
-        delete ctx.nameSkipped;
-        return confirmAsk(ctx, now);
-      }
+      // Прямая поправка без слова «дата»/«время»: «нет, лучше завтра».
+      if (applyCorrections(ctx, nlu)) return advanceChecked(ctx, now);
       // Мастер — такой же слот, как дата и время (D-021): его меняют
       // и словом «мастер», и просто именем («нет, к Артёму»).
       if (wantsMaster || master) {
         if (master) {
           ctx.slots.masterId = master.id;
-          return confirmAsk(ctx, now);
+          return advanceChecked(ctx, now);
         }
         delete ctx.slots.masterId;
         return askMaster(ctx, nlu.text);
@@ -785,12 +865,12 @@ const handlers: Record<StateId, Handler> = {
       if (bareName) {
         ctx.slots.name = bareName;
         delete ctx.nameSkipped;
-        return confirmAsk(ctx, now);
+        return advanceChecked(ctx, now);
       }
       return misunderstood(ctx, 'CONFIRM');
     }
 
-    // подтверждение отмены
+    // подтверждение отмены записи
     if (ctx.pending === 'cancel') {
       if (nlu.yes) {
         const actions: Action[] = ctx.bookingId
@@ -800,19 +880,60 @@ const handlers: Record<StateId, Handler> = {
         ctx.pending = undefined;
         ctx.bookingId = undefined;
         ctx.bookings = undefined;
+        delete ctx.activeBooking;
+        delete ctx.abortState;
         ctx.outcome = 'cancelled';
         ctx.state = 'DONE';
         return { ctx, say: pick(ctx, R.cancelled), actions };
       }
       if (nlu.no) {
+        const target = ctx.abortState;
+        delete ctx.abortState;
         ctx.pending = undefined;
-        return advance(ctx, now);
+        // «Стоп» посреди записи: возвращаемся к прерванному вопросу.
+        if (target) {
+          if (target === 'CONFIRM') return confirmAsk(ctx, now);
+          return askAgain(ctx, target);
+        }
+        // Отмена найденной записи: оставляем её как есть и спрашиваем, что дальше.
+        ctx.bookingId = undefined;
+        ctx.bookings = undefined;
+        delete ctx.activeBooking;
+        const res = goto(ctx, 'INTENT', R.askIntent);
+        return { ctx, say: [...pick(ctx, R.cancelAborted), ...res.say], actions: [] };
+      }
+      return misunderstood(ctx, 'CONFIRM');
+    }
+
+    // подтверждение прекращения переноса: сама запись остаётся неизменной
+    if (ctx.pending === 'cancel_reschedule') {
+      if (nlu.yes) {
+        ctx.pending = undefined;
+        ctx.bookingId = undefined;
+        ctx.bookings = undefined;
+        delete ctx.activeBooking;
+        delete ctx.abortState;
+        ctx.state = 'DONE';
+        return { ctx, say: pick(ctx, R.rescheduleAborted), actions: [] };
+      }
+      if (nlu.no) {
+        const target = ctx.abortState ?? 'ASK_DATE';
+        delete ctx.abortState;
+        ctx.pending = 'reschedule';
+        if (target === 'CONFIRM') return confirmAsk(ctx, now);
+        return askAgain(ctx, target);
       }
       return misunderstood(ctx, 'CONFIRM');
     }
 
     // подтверждение переноса
     if (ctx.pending === 'reschedule' && ctx.bookingId) {
+      // «Нет, лучше в 19:00» — правим время и подтверждаем заново.
+      if (applyCorrections(ctx, nlu)) return advanceChecked(ctx, now);
+      if (master) {
+        ctx.slots.masterId = master.id;
+        return advanceChecked(ctx, now);
+      }
       if (nlu.yes) {
         const actions: Action[] = [{
           type: 'reschedule_booking',
@@ -826,24 +947,24 @@ const handlers: Record<StateId, Handler> = {
         // и сможет повторить перенос той же записи.
         ctx.outcome = 'rescheduled';
         ctx.state = 'DONE';
-        return { ctx, say: pick(ctx, R.rescheduled), actions };
+        return { ctx, say: pick(ctx, [R.rescheduled(summaryOf(ctx, now))]), actions };
       }
       if (nlu.no) {
+        delete ctx.slots.date;
+        delete ctx.slots.time;
+        delete ctx.slots.timeRange;
+        delete ctx.nearest;
         return goto(ctx, 'ASK_DATE', R.askDate);   // на какую дату переносим
       }
       return misunderstood(ctx, 'CONFIRM');
     }
 
-    // Мастера и имя можно назвать прямо в подтверждении, не переходя
-    // в «что изменить»: «хочу мастера Ивана», «меня зовут Иван».
-    if (nlu.name) {
-      ctx.slots.name = nlu.name;
-      delete ctx.nameSkipped;
-      return confirmAsk(ctx, now);
-    }
+    // Прямая поправка без перехода в «что изменить»: «завтра», «в 19:00»,
+    // «стрижка», новый телефон. Слот применяем и подтверждаем заново.
+    if (applyCorrections(ctx, nlu)) return advanceChecked(ctx, now);
     if (master) {
       ctx.slots.masterId = master.id;
-      return confirmAsk(ctx, now);
+      return advanceChecked(ctx, now);
     }
     if (wantsMaster) {
       delete ctx.slots.masterId;
@@ -852,7 +973,7 @@ const handlers: Record<StateId, Handler> = {
     if (bareName) {
       ctx.slots.name = bareName;
       delete ctx.nameSkipped;
-      return confirmAsk(ctx, now);
+      return advanceChecked(ctx, now);
     }
 
     if (nlu.yes) {
@@ -873,6 +994,17 @@ const handlers: Record<StateId, Handler> = {
 
   FIND_BOOKING: async (ctx, nlu, now) => {
     absorb(ctx, nlu);
+
+    // «Стоп» в поиске записи — прекращаем поиск, а не подтверждаем отмену.
+    if (/(стоп|хватит|не надо)/.test(nlu.text)) {
+      ctx.pending = undefined;
+      ctx.bookings = undefined;
+      return goto(ctx, 'INTENT', R.askIntent);
+    }
+
+    // Клиент передумал: «нет, лучше отмените» / «а можно перенести».
+    if (nlu.intent === 'cancel' && ctx.pending !== 'cancel') ctx.pending = 'cancel';
+    if (nlu.intent === 'reschedule' && ctx.pending !== 'reschedule') ctx.pending = 'reschedule';
 
     // Клиент выбирает одну из нескольких найденных записей.
     if (ctx.bookings?.length && !ctx.bookingId) {
@@ -917,9 +1049,9 @@ const handlers: Record<StateId, Handler> = {
       ctx.slots.phone = nlu.phone;
       return finish(nlu.phone);
     }
-    // «Нет», «не хочу», «пропустить» — не запираем клиента: задачу всё равно
+    // «Нет», «не хочу», «пропустить», «стоп» — не запираем клиента: задачу всё равно
     // создаём, администратор ответит ему в Telegram.
-    if (nlu.no || /(пропустить|без телефона|не хочу|не надо)/.test(nlu.text)) return finish();
+    if (nlu.no || /(пропустить|без телефона|не хочу|не надо|стоп|хватит)/.test(nlu.text)) return finish();
     if (nlu.digits || nlu.phoneStatus) return say(ctx, R.phoneAgain);
 
     // Несколько непонятных ответов подряд — не держим клиента в цикле.

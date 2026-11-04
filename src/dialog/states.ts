@@ -34,7 +34,7 @@ export type Ctx = {
   lastActivityAt: number;
   outcome?: 'booked' | 'handoff' | 'cancelled' | 'abandoned' | 'faq_answered' | 'faq_declined' | 'rescheduled';
   /** Что именно ждём от клиента в текущем состоянии: отмена записи или «что изменить». */
-  pending?: 'cancel' | 'change' | 'reschedule';
+  pending?: 'cancel' | 'cancel_reschedule' | 'change' | 'reschedule';
   /** Состояние, вопрос которого был задан последним: нужно для глобального «назад». */
   lastAsked?: StateId;
   /** Клиент отказался называть имя — не переспрашиваем до конца записи. */
@@ -47,12 +47,16 @@ export type Ctx = {
   handoffReason?: string;
   /** Запись, которую клиент переносит или отменяет. */
   bookingId?: number;
+  /** Полные данные найденной записи: нужны для повторной формулировки отмены. */
+  activeBooking?: BookingRef;
   /** Найденные записи клиента — если их несколько, нужно выбрать. */
   bookings?: BookingRef[];
   /** Клиент просит ближайшее время, но услуга ещё не названа. */
   wantsNearest?: boolean;
   /** Показанные варианты «ближайшее время» — выбор из них в OFFER_SLOTS. */
   nearest?: NearestOption[];
+  /** Состояние, в которое вернёмся, если клиент передумал прерывать перенос. */
+  abortState?: StateId;
 };
 
 /** Запись, найденная по телефону: то, что нужно для переноса и отмены. */
