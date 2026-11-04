@@ -8,7 +8,7 @@ import {
 } from './policies';
 import { formatDate, hasFaqQuestion, looksLikeName, understand, type Nlu } from '../nlu/intent';
 import { dateIssue, isoDate } from '../nlu/dates';
-import { outsideWorkHours } from '../nlu/time';
+import { outsideWorkHours, parseBareHour } from '../nlu/time';
 import { answerSmalltalk } from './smalltalk';
 import { answerKb } from '../services/kb';
 import {
@@ -146,7 +146,30 @@ function absorb(ctx: Ctx, nlu: Nlu): void {
   if (!s.name && nlu.name) s.name = nlu.name;
 }
 
-/** После каждой реплики смотрим, какого слота не хватает, и спрашиваем про первый. */
+/**
+ * «к 17 к Артёму»: число — это время, а не дата, если назван мастер.
+ */
+function fixMasterTime(nlu: Nlu): void {
+  const master = matchMaster(nlu.text);
+  if (!master || nlu.time || !nlu.date) return;
+  const m = /(?<![\p{L}\d])(\d{1,2})(?![\p{L}\d])/u.exec(nlu.text);
+  if (!m) return;
+  const bare = parseBareHour(m[1]!);
+  if (bare) {
+    nlu.time = bare;
+    delete nlu.date;
+  }
+}
+
+/** Короткая дата для сообщений: «17 ноября». */
+function shortDate(date: string): string {
+  const [y, m, d] = date.split('-').map(Number);
+  const months = [
+    'января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
+    'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря',
+  ];
+  return `${d} ${months[m - 1]}`;
+}
 async function advance(ctx: Ctx, now: Date): Promise<StepResult> {
   const s = ctx.slots;
   if (!s.service) return goto(ctx, 'ASK_SERVICE', R.askService);
@@ -534,7 +557,11 @@ async function offerOtherDays(ctx: Ctx, now: Date): Promise<StepResult> {
       return `${formatDate(d.date, now)} — ${times.join(', ')}`;
     })
     .join('; ');
-  return goto(ctx, 'ASK_DATE', [`${R.noSlots[0]} Ближайшие окна: ${list}. На какой день вам удобно?`]);
+  // Если конкретный день не подошёл, говорим об этом явно, а не общо.
+  const noSlotsText = ctx.slots.date
+    ? `На ${shortDate(ctx.slots.date)} свободных окон пока нет.`
+    : R.noSlots[0];
+  return goto(ctx, 'ASK_DATE', [`${noSlotsText} Ближайшие окна: ${list}. На какой день вам удобно?`]);
 }
 
 /** Клиент сказал неоднозначно — уточняем, слот не заполняем. */
@@ -678,6 +705,7 @@ const handlers: Record<StateId, Handler> = {
 
   ASK_DATE: async (ctx, nlu, now) => {
     absorb(ctx, nlu);
+    fixMasterTime(nlu);
     // «Когда есть ближайшее?», «любой», «без разницы» — показываем окна,
     // а не переспрашиваем дату.
     if ((nlu.nearest || ANY_CHOICE_RE.test(nlu.text)) && !nlu.time) {
@@ -695,6 +723,7 @@ const handlers: Record<StateId, Handler> = {
 
   ASK_TIME: async (ctx, nlu, now) => {
     absorb(ctx, nlu);
+    fixMasterTime(nlu);
     if ((nlu.nearest || ANY_CHOICE_RE.test(nlu.text)) && !nlu.time && !nlu.timeRange) {
       ctx.retries.ASK_TIME = 0;
       return offerNearest(ctx, now);
@@ -709,6 +738,7 @@ const handlers: Record<StateId, Handler> = {
 
   OFFER_SLOTS: async (ctx, nlu, now) => {
     absorb(ctx, nlu);
+    fixMasterTime(nlu);
 
     // Непонятный ответ: сначала переспрашиваем, потом предлагаем другие дни,
     // и только затем передаём администратору. Иначе список повторяется вечно.
