@@ -305,6 +305,9 @@ async function offerNearest(ctx: Ctx, now: Date): Promise<StepResult> {
   return goto(ctx, 'OFFER_SLOTS', R.nearest(list));
 }
 
+/** «Любое», «без разницы», «как удобнее» — выбрать ближайший вариант из списка. */
+const ANY_CHOICE_RE = /(?:люб\p{L}*|вс[её]\s*равно|без\s*разниц\p{L}*|не\s*важно|неважно|на\s+(?:ваш|твой)\s+выбор|как\s+удобн\p{L}*|что\s+удобн\p{L}*|хоть\s+что|перв\p{L}*\s+вариант)/u;
+
 /** Выбор варианта из списка ближайших окон: номер, время или «любой». */
 function pickNearest(nlu: Nlu, options: NearestOption[]): NearestOption | undefined {
   const index: Record<string, number> = {
@@ -317,7 +320,7 @@ function pickNearest(nlu: Nlu, options: NearestOption[]): NearestOption | undefi
     return options.find((o) => o.date === nlu.date && o.time === nlu.time);
   }
   if (nlu.time) return options.find((o) => o.time === nlu.time);
-  if (/(?:люб\p{L}*|все равно|первый вариант)/u.test(nlu.text)) return options[0];
+  if (ANY_CHOICE_RE.test(nlu.text)) return options[0];
   return undefined;
 }
 
@@ -332,7 +335,8 @@ function pickSlot(nlu: Nlu, free: FreeSlot[]): FreeSlot | undefined {
     const found = free.find((s) => s.time === nlu.time);
     if (found) return found;
   }
-  if (/(любой|любая|все равно|что есть|первый вариант)/.test(nlu.text)) return free[0];
+  // «Любое» — значит ближайшее из уже показанных, а не повтор списка.
+  if (ANY_CHOICE_RE.test(nlu.text)) return free[0];
   return undefined;
 }
 

@@ -382,6 +382,26 @@ describe('выбор окна и вопросы посреди записи', ()
     expect(res.say.join(' ')).not.toContain('17:00, 17:00');
   });
 
+  it('«любое» в списке окон выбирает ближайшее время, а не повторяет список', async () => {
+    const { ctx } = await play(['хочу записаться', 'стрижка', 'завтра', 'после обеда']);
+    expect(ctx.state).toBe('OFFER_SLOTS');
+
+    const res = await step(ctx, { type: 'user_text', text: 'любое' }, NOW);
+    expect(res.ctx.slots.time).toBe('13:00');
+    expect(res.ctx.state).toBe('ASK_CONTACT');
+    expect(res.say.join(' ')).not.toContain('Свободное время');
+  });
+
+  it('«любое время» в списке окон — тоже выбор ближайшего', async () => {
+    const { ctx } = await play(['хочу записаться', 'стрижка', 'завтра', 'после обеда']);
+    expect(ctx.state).toBe('OFFER_SLOTS');
+
+    const res = await step(ctx, { type: 'user_text', text: 'любое время' }, NOW);
+    expect(res.ctx.slots.time).toBe('13:00');
+    expect(res.ctx.state).toBe('ASK_CONTACT');
+    expect(res.say.join(' ')).not.toContain('Свободное время');
+  });
+
   it('«13 диана» в списке окон — это время и мастер, а не 13-е число', async () => {
     const { ctx } = await play(['хочу записаться', 'стрижка', 'давай на после завтра после обеда']);
     expect(ctx.state).toBe('OFFER_SLOTS');
