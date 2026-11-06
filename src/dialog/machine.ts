@@ -63,10 +63,16 @@ export async function step(ctx: Ctx, ev: BotEvent, now: Date): Promise<StepResul
   }
 
   // Клиент спрашивает о своих записях: показываем предстоящие по Telegram-аккаунту.
-  if (nlu.intent === 'my_bookings') {
+  if ((nlu.intent as string) === 'my_bookings') {
     if (ctx.state !== 'INTENT' && ctx.state !== 'START' && ctx.state !== 'FAQ' && ctx.state !== 'RESUME') {
       ctx.resume = ctx.state;
     }
+    return commit(ctx, ev, { ...await myBookingsTurn(ctx, now), nlu }, now);
+  }
+
+  // Клиент спрашивает о своих записях.
+  if ((nlu.intent as string) === 'my_bookings') {
+    if (ctx.state !== 'INTENT' && ctx.state !== 'START' && ctx.state !== 'FAQ' && ctx.state !== 'RESUME') ctx.resume = ctx.state;
     return commit(ctx, ev, { ...await myBookingsTurn(ctx, now), nlu }, now);
   }
 
@@ -629,39 +635,21 @@ async function faqAnswer(ctx: Ctx, question: string): Promise<StepResult> {
 
 async function myBookingsTurn(ctx: Ctx, now: Date): Promise<StepResult> {
   if (ctx.telegramId == null) {
-    if (ctx.resume) {
-      ctx.state = 'RESUME';
-      ctx.lastAsked = 'RESUME';
-      return { ctx, say: ['������ ������ ����� �� Telegram-��������, � �������� �� ������������.', ...pick(ctx, R.continueBooking)], actions: [], humanize: false };
-    }
-    ctx.state = 'INTENT';
-    ctx.lastAsked = 'INTENT';
-    return { ctx, say: ['������ ������ ����� �� Telegram-��������, � �������� �� ������������.', ...pick(ctx, R.askIntent)], actions: [], humanize: false };
+    const text = R.myBookingsNoTelegram[0];
+    if (ctx.resume) { ctx.state = 'RESUME'; ctx.lastAsked = 'RESUME'; return { ctx, say: [text, ...pick(ctx, R.continueBooking)], actions: [], humanize: false }; }
+    ctx.state = 'INTENT'; ctx.lastAsked = 'INTENT'; return { ctx, say: [text, ...pick(ctx, R.askIntent)], actions: [], humanize: false };
   }
   const bookings = await findBookingsByTelegramId(ctx.telegramId, now);
   if (!bookings.length) {
-    const text = '����������� ������� �� �����.';
-    if (ctx.resume) {
-      ctx.state = 'RESUME';
-      ctx.lastAsked = 'RESUME';
-      return { ctx, say: [text, ...pick(ctx, R.continueBooking)], actions: [], humanize: false };
-    }
-    ctx.state = 'INTENT';
-    ctx.lastAsked = 'INTENT';
-    return { ctx, say: [text, ...pick(ctx, R.askIntent)], actions: [], humanize: false };
+    const text = R.myBookingsNone[0];
+    if (ctx.resume) { ctx.state = 'RESUME'; ctx.lastAsked = 'RESUME'; return { ctx, say: [text, ...pick(ctx, R.continueBooking)], actions: [], humanize: false }; }
+    ctx.state = 'INTENT'; ctx.lastAsked = 'INTENT'; return { ctx, say: [text, ...pick(ctx, R.askIntent)], actions: [], humanize: false };
   }
-  const list = bookings.map((b) => `${b.serviceTitle}, ${b.date} ${b.time}, ������ ${b.masterName}`).join('; ');
-  const text = `���� ����������� ������: ${list}.`;
-  if (ctx.resume) {
-    ctx.state = 'RESUME';
-    ctx.lastAsked = 'RESUME';
-    return { ctx, say: [text, ...pick(ctx, R.continueBooking)], actions: [], humanize: false };
-  }
-  ctx.state = 'INTENT';
-  ctx.lastAsked = 'INTENT';
-  return { ctx, say: [text, ...pick(ctx, R.askIntent)], actions: [], humanize: false };
+  const list = bookings.map((b) => b.serviceTitle + ', ' + (b.date) + ' ' + b.time + ', ' + '\u043C\u0430\u0441\u0442\u0435\u0440 ' + b.masterName).join('; ');
+  const text = R.myBookingsList(list)[0];
+  if (ctx.resume) { ctx.state = 'RESUME'; ctx.lastAsked = 'RESUME'; return { ctx, say: [text, ...pick(ctx, R.continueBooking)], actions: [], humanize: false }; }
+  ctx.state = 'INTENT'; ctx.lastAsked = 'INTENT'; return { ctx, say: [text, ...pick(ctx, R.askIntent)], actions: [], humanize: false };
 }
-
 const handlers: Record<StateId, Handler> = {
   START: async (ctx, nlu, now) => {
     const hello = pick(ctx, R.greet);
@@ -762,6 +750,7 @@ const handlers: Record<StateId, Handler> = {
   ASK_DATE: async (ctx, nlu, now) => {
     absorb(ctx, nlu);
     fixMasterTime(nlu);
+    fixMasterTime(nlu);
     // «Когда есть ближайшее?», «любой», «без разницы» — показываем окна,
     // а не переспрашиваем дату.
     if ((nlu.nearest || ANY_CHOICE_RE.test(nlu.text)) && !nlu.time) {
@@ -780,6 +769,7 @@ const handlers: Record<StateId, Handler> = {
   ASK_TIME: async (ctx, nlu, now) => {
     absorb(ctx, nlu);
     fixMasterTime(nlu);
+    fixMasterTime(nlu);
     if ((nlu.nearest || ANY_CHOICE_RE.test(nlu.text)) && !nlu.time && !nlu.timeRange) {
       ctx.retries.ASK_TIME = 0;
       return offerNearest(ctx, now);
@@ -794,6 +784,7 @@ const handlers: Record<StateId, Handler> = {
 
   OFFER_SLOTS: async (ctx, nlu, now) => {
     absorb(ctx, nlu);
+    fixMasterTime(nlu);
     fixMasterTime(nlu);
 
     // Непонятный ответ: сначала переспрашиваем, потом предлагаем другие дни,
