@@ -62,6 +62,14 @@ export async function step(ctx: Ctx, ev: BotEvent, now: Date): Promise<StepResul
     return commit(ctx, ev, { ...await smalltalkTurn(ctx, nlu, now), nlu }, now);
   }
 
+  // Клиент спрашивает о своих записях: показываем предстоящие по Telegram-аккаунту.
+  if (nlu.intent === 'my_bookings') {
+    if (ctx.state !== 'INTENT' && ctx.state !== 'START' && ctx.state !== 'FAQ' && ctx.state !== 'RESUME') {
+      ctx.resume = ctx.state;
+    }
+    return commit(ctx, ev, { ...await myBookingsTurn(ctx, now), nlu }, now);
+  }
+
   // Клиент задал вопрос посреди записи — отвечаем из базы знаний и предлагаем продолжить.
   if (nlu.intent === 'faq' && ctx.state !== 'INTENT' && ctx.state !== 'FAQ') {
     // START: бот ещё ничего не спрашивал, возвращаться некуда. RESUME: цель уже сохранена.
@@ -617,6 +625,41 @@ async function faqAnswer(ctx: Ctx, question: string): Promise<StepResult> {
   // Ответа нет — это уже передача администратору. Запись не продолжаем:
   // сначала просим контакт, чтобы администратор мог связаться с клиентом.
   return handoff(ctx, 'faq_not_found', R.noAnswer, 'faq_declined');
+}
+
+async function myBookingsTurn(ctx: Ctx, now: Date): Promise<StepResult> {
+  if (ctx.telegramId == null) {
+    if (ctx.resume) {
+      ctx.state = 'RESUME';
+      ctx.lastAsked = 'RESUME';
+      return { ctx, say: ['������ ������ ����� �� Telegram-��������, � �������� �� ������������.', ...pick(ctx, R.continueBooking)], actions: [], humanize: false };
+    }
+    ctx.state = 'INTENT';
+    ctx.lastAsked = 'INTENT';
+    return { ctx, say: ['������ ������ ����� �� Telegram-��������, � �������� �� ������������.', ...pick(ctx, R.askIntent)], actions: [], humanize: false };
+  }
+  const bookings = await findBookingsByTelegramId(ctx.telegramId, now);
+  if (!bookings.length) {
+    const text = '����������� ������� �� �����.';
+    if (ctx.resume) {
+      ctx.state = 'RESUME';
+      ctx.lastAsked = 'RESUME';
+      return { ctx, say: [text, ...pick(ctx, R.continueBooking)], actions: [], humanize: false };
+    }
+    ctx.state = 'INTENT';
+    ctx.lastAsked = 'INTENT';
+    return { ctx, say: [text, ...pick(ctx, R.askIntent)], actions: [], humanize: false };
+  }
+  const list = bookings.map((b) => `${b.serviceTitle}, ${b.date} ${b.time}, ������ ${b.masterName}`).join('; ');
+  const text = `���� ����������� ������: ${list}.`;
+  if (ctx.resume) {
+    ctx.state = 'RESUME';
+    ctx.lastAsked = 'RESUME';
+    return { ctx, say: [text, ...pick(ctx, R.continueBooking)], actions: [], humanize: false };
+  }
+  ctx.state = 'INTENT';
+  ctx.lastAsked = 'INTENT';
+  return { ctx, say: [text, ...pick(ctx, R.askIntent)], actions: [], humanize: false };
 }
 
 const handlers: Record<StateId, Handler> = {

@@ -13,7 +13,7 @@ import { detectSmalltalk, type SmalltalkKind } from './smalltalk';
  * (normalize.ts, numbers.ts, dates.ts, time.ts) — здесь только то, что нужно автомату.
  */
 
-export type NluIntent = 'booking' | 'reschedule' | 'cancel' | 'faq' | 'handoff' | 'smalltalk' | 'unknown';
+export type NluIntent = 'booking' | 'reschedule' | 'cancel' | 'faq' | 'handoff' | 'smalltalk' | 'my_bookings' | 'unknown';
 
 export type Nlu = {
   intent: NluIntent;
@@ -127,6 +127,9 @@ const detectIntent = (text: string, raw = ''): NluIntent => {
   const nearest = NEAREST_RE.test(text);
   const nearestWithoutUrgency = NEAREST_RE.test(text.replace(/срочн\p{L}*/giu, ' '));
   if (!nearestWithoutUrgency && FAQ_RE.test(text) && isQuestion && !ACTION_REQUEST_RE.test(text)) return 'faq';
+
+  // «Когда я записан?», «мои записи» — запрос своих записей, а не новая запись.
+  if (/(?:когда\s+(?:я\s+)?записан|мои\s+записи|когда\s+у\s+меня\s+запись|покажи\s+запис|какие\s+у\s+меня\s+записи|список\s+записей|есть\s+ли\s+у\s+меня\s+запись)/iu.test(text)) return 'my_bookings';
 
   if (/(отмени|отмена|отмену|отмен)/.test(text)) return 'cancel';
   if (/(перенес|перенос|перенести|перенеси|другой день|другое время|передвинуть)/.test(text)) return 'reschedule';
