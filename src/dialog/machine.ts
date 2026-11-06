@@ -376,7 +376,7 @@ function applyCorrections(ctx: Ctx, nlu: Nlu): boolean {
 /** Показать свободные окна и войти в OFFER_SLOTS. Показываем не больше трёх. */
 function offerSlots(ctx: Ctx, free: FreeSlot[], now: Date, prefix?: string): StepResult {
   delete ctx.nearest;
-  const list = free.slice(0, 3).map((s, i) => `${i + 1}) ${s.time}${s.masterName ? ' — ' + s.masterName : ''}`).join(', ');
+  const list = free.slice(0, 10).map((s, i) => `${i + 1}) ${s.time}${s.masterName ? ' — ' + s.masterName : ''}`).join(', ');
   const when = ctx.slots.date ? formatDate(ctx.slots.date, now) : 'в этот день';
   const head = prefix ? prefix + ' ' : '';
   return goto(ctx, 'OFFER_SLOTS', [`${head}Свободное время ${when}: ${list}. Какое выбираете?`]);

@@ -163,6 +163,7 @@ export function parseTimeRules(text: string): TimeResult {
   }
 
   // 7. Неточное время: это диапазон, а не конкретный час
+  if (/не\s*хочу\s*утром|не\s*утром|попозже/.test(text)) { out.timeRange = { from: '17:00', to: '21:00' }; return out; }
   if (/после\s+обеда/.test(text)) { out.timeRange = { from: '13:00', to: '17:00' }; return out; }
   if (/утром/.test(text)) { out.timeRange = { from: '10:00', to: '12:00' }; return out; }
   if (/вечером|ближе к вечеру/.test(text)) { out.timeRange = { from: '17:00', to: '21:00' }; return out; }
