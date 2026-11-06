@@ -666,7 +666,7 @@ const handlers: Record<StateId, Handler> = {
       ctx.slots.service = nlu.service;
       ctx.retries.ASK_SERVICE = 0;
       if (nlu.nearest || ctx.wantsNearest) return offerNearest(ctx, now);
-      return advance(ctx, now);
+      return advanceChecked(ctx, now);
     }
     if (nlu.nearest) {
       ctx.wantsNearest = true;
@@ -683,12 +683,25 @@ const handlers: Record<StateId, Handler> = {
       delete ctx.slots.masterId;
       ctx.retries.ASK_MASTER = 0;
       if (nlu.nearest || ctx.wantsNearest) return offerNearest(ctx, now);
-      return advance(ctx, now);
+      return advanceChecked(ctx, now);
     }
     if (ctx.slots.masterId) {
+      // Проверяем, что мастер делает эту услугу и есть свободные окна.
+      if (ctx.slots.date) {
+        const freeMaster = await findSlots(ctx.slots.service, ctx.slots.date, now, { masterId: ctx.slots.masterId });
+        if (!freeMaster.length) {
+          const freeAny = await findSlots(ctx.slots.service, ctx.slots.date, now, {});
+          if (freeAny.length) {
+            const name = masterById(ctx.slots.masterId)?.name ?? '';
+            delete ctx.slots.masterId;
+            ctx.retries.ASK_MASTER = 0;
+            return goto(ctx, 'ASK_MASTER', [`${name} такую услугу не делает. К какому мастеру записать?`]);
+          }
+        }
+      }
       ctx.retries.ASK_MASTER = 0;
       if (nlu.nearest || ctx.wantsNearest) return offerNearest(ctx, now);
-      return advance(ctx, now);
+      return advanceChecked(ctx, now);
     }
     // «Когда есть?» вместо имени мастера — значит, мастер любой.
     if (nlu.nearest || ctx.wantsNearest) {
@@ -715,7 +728,7 @@ const handlers: Record<StateId, Handler> = {
     if (nlu.date) {
       ctx.slots.date = nlu.date;
       ctx.retries.ASK_DATE = 0;
-      return advance(ctx, now);
+      return advanceChecked(ctx, now);
     }
     if (nlu.service || nlu.time || nlu.timeRange || nlu.phone) return goto(ctx, 'ASK_DATE', R.askDate);
     return misunderstood(ctx, 'ASK_DATE');
@@ -864,6 +877,14 @@ const handlers: Record<StateId, Handler> = {
       // и словом «мастер», и просто именем («нет, к Артёму»).
       if (wantsMaster || master) {
         if (master) {
+          if (ctx.slots.date) {
+            const freeMaster = await findSlots(ctx.slots.service, ctx.slots.date, now, { masterId: master.id });
+            const freeAny = freeMaster.length ? freeMaster : await findSlots(ctx.slots.service, ctx.slots.date, now, {});
+            if (!freeMaster.length && freeAny.length) {
+              delete ctx.slots.masterId;
+              return goto(ctx, 'ASK_MASTER', [`${master.name} такую услугу не делает. К какому мастеру записать?`]);
+            }
+          }
           ctx.slots.masterId = master.id;
           return advanceChecked(ctx, now);
         }
@@ -993,6 +1014,15 @@ const handlers: Record<StateId, Handler> = {
     // «стрижка», новый телефон. Слот применяем и подтверждаем заново.
     if (applyCorrections(ctx, nlu)) return advanceChecked(ctx, now);
     if (master) {
+      // Проверяем совместимость мастера с услугой.
+      if (ctx.slots.date) {
+        const freeMaster = await findSlots(ctx.slots.service, ctx.slots.date, now, { masterId: master.id });
+        const freeAny = freeMaster.length ? freeMaster : await findSlots(ctx.slots.service, ctx.slots.date, now, {});
+        if (!freeMaster.length && freeAny.length) {
+          delete ctx.slots.masterId;
+          return goto(ctx, 'ASK_MASTER', [`${master.name} такую услугу не делает. К какому мастеру записать?`]);
+        }
+      }
       ctx.slots.masterId = master.id;
       return advanceChecked(ctx, now);
     }
