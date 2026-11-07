@@ -130,7 +130,7 @@ function absorb(ctx: Ctx, nlu: Nlu): void {
   // иначе честно увидит в «первый» первое число следующего месяца.
   const choiceTurn = (ctx.state === 'OFFER_SLOTS'
     || (ctx.state === 'FIND_BOOKING' && !!ctx.bookings?.length && !ctx.bookingId))
-    && /^(?:[1-3]|один|два|три|перв\p{L}*|втор\p{L}*|трет\p{L}*)$/u.test(nlu.text.trim());
+    && /^(?:\d{1,2}|один|два|три|перв\p{L}*|втор\p{L}*|трет\p{L}*)$/u.test(nlu.text.trim());
   if (!phoneTurn) {
     // Услуга и дата, как и время, — «последнее сказанное главнее»: клиент может
     // передумать посреди записи («ой нет, лучше в субботу») или поправить слот.
@@ -432,7 +432,10 @@ function choiceIndex(text: string): number | undefined {
   const t = text.trim()
     .replace(/^вариант\s+/u, '')
     .replace(/\s+вариант$/u, '');
-  return CHOICE_INDEX[t];
+  if (CHOICE_INDEX[t] != null) return CHOICE_INDEX[t];
+  // «7», «10» — номер варианта в списке (до 99).
+  if (/^\d{1,2}$/.test(t)) return Number(t) - 1;
+  return undefined;
 }
 
 /** Выбор варианта из списка ближайших окон: номер, время или «любой». */
